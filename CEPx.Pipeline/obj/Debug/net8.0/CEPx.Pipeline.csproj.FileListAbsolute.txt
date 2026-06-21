@@ -13,3 +13,4 @@ C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.dll
 C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\refint\CEPx.Pipeline.dll
 C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.pdb
 C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\ref\CEPx.Pipeline.dll
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.sourcelink.json

@@ -7,62 +7,14 @@
   "targets": {
     ".NETCoreApp,Version=v8.0": {
       "CEPx.Policy/1.0.0": {
-        "dependencies": {
-          "CEPx.Blackboard": "1.0.0"
-        },
         "runtime": {
           "CEPx.Policy.dll": {}
-        }
-      },
-      "CEPx.Blackboard/1.0.0": {
-        "dependencies": {
-          "CEPx.Pipeline": "1.0.0"
-        },
-        "runtime": {
-          "CEPx.Blackboard.dll": {
-            "assemblyVersion": "1.0.0.0",
-            "fileVersion": "1.0.0.0"
-          }
-        }
-      },
-      "CEPx.Core/1.0.0": {
-        "runtime": {
-          "CEPx.Core.dll": {
-            "assemblyVersion": "1.0.0.0",
-            "fileVersion": "1.0.0.0"
-          }
-        }
-      },
-      "CEPx.Pipeline/1.0.0": {
-        "dependencies": {
-          "CEPx.Core": "1.0.0"
-        },
-        "runtime": {
-          "CEPx.Pipeline.dll": {
-            "assemblyVersion": "1.0.0.0",
-            "fileVersion": "1.0.0.0"
-          }
         }
       }
     }
   },
   "libraries": {
     "CEPx.Policy/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
-    },
-    "CEPx.Blackboard/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
-    },
-    "CEPx.Core/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
-    },
-    "CEPx.Pipeline/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

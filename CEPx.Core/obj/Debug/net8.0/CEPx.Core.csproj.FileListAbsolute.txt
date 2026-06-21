@@ -9,3 +9,4 @@ C:\Users\User\cepx2\CEPx.Core\obj\Debug\net8.0\CEPx.Core.dll
 C:\Users\User\cepx2\CEPx.Core\obj\Debug\net8.0\refint\CEPx.Core.dll
 C:\Users\User\cepx2\CEPx.Core\obj\Debug\net8.0\CEPx.Core.pdb
 C:\Users\User\cepx2\CEPx.Core\obj\Debug\net8.0\ref\CEPx.Core.dll
+C:\Users\User\cepx2\CEPx.Core\obj\Debug\net8.0\CEPx.Core.sourcelink.json

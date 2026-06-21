@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\CEPx.Policy\CEPx.Policy.csproj" />
+    <ProjectReference Include="..\CEPx.Pipeline\CEPx.Pipeline.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

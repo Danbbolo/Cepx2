@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("CEPx.Blackboard")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d3305e06158ee150ed0da45cb91b799730c733ed")]
 [assembly: System.Reflection.AssemblyProductAttribute("CEPx.Blackboard")]
 [assembly: System.Reflection.AssemblyTitleAttribute("CEPx.Blackboard")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

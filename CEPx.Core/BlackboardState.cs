@@ -14,4 +14,20 @@ public readonly struct BlackboardState
     public readonly string Regime;
     public readonly double RegimeConfidence;
     public readonly string LastAction;
+
+    public BlackboardState(long timestamp, string symbol, bool sweepActive, string patternFamily, double patternSimilarity, double kalmanVelocity, double uncertaintyUpper, double uncertaintyLower, double anomalyScore, string regime, double regimeConfidence, string lastAction)
+    {
+        Timestamp = timestamp;
+        Symbol = symbol;
+        SweepActive = sweepActive;
+        PatternFamily = patternFamily;
+        PatternSimilarity = patternSimilarity;
+        KalmanVelocity = kalmanVelocity;
+        UncertaintyUpper = uncertaintyUpper;
+        UncertaintyLower = uncertaintyLower;
+        AnomalyScore = anomalyScore;
+        Regime = regime;
+        RegimeConfidence = regimeConfidence;
+        LastAction = lastAction;
+    }
 }

@@ -1,66 +1,11 @@
 {
   "version": 4,
   "targets": {
-    "net8.0": {
-      "CEPx.Blackboard/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v8.0",
-        "dependencies": {
-          "CEPx.Pipeline": "1.0.0"
-        },
-        "compile": {
-          "bin/placeholder/CEPx.Blackboard.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/CEPx.Blackboard.dll": {}
-        }
-      },
-      "CEPx.Core/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v8.0",
-        "compile": {
-          "bin/placeholder/CEPx.Core.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/CEPx.Core.dll": {}
-        }
-      },
-      "CEPx.Pipeline/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v8.0",
-        "dependencies": {
-          "CEPx.Core": "1.0.0"
-        },
-        "compile": {
-          "bin/placeholder/CEPx.Pipeline.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/CEPx.Pipeline.dll": {}
-        }
-      }
-    }
+    "net8.0": {}
   },
-  "libraries": {
-    "CEPx.Blackboard/1.0.0": {
-      "type": "project",
-      "path": "../CEPx.Blackboard/CEPx.Blackboard.csproj",
-      "msbuildProject": "../CEPx.Blackboard/CEPx.Blackboard.csproj"
-    },
-    "CEPx.Core/1.0.0": {
-      "type": "project",
-      "path": "../CEPx.Core/CEPx.Core.csproj",
-      "msbuildProject": "../CEPx.Core/CEPx.Core.csproj"
-    },
-    "CEPx.Pipeline/1.0.0": {
-      "type": "project",
-      "path": "../CEPx.Pipeline/CEPx.Pipeline.csproj",
-      "msbuildProject": "../CEPx.Pipeline/CEPx.Pipeline.csproj"
-    }
-  },
+  "libraries": {},
   "projectFileDependencyGroups": {
-    "net8.0": [
-      "CEPx.Blackboard >= 1.0.0"
-    ]
+    "net8.0": []
   },
   "packageFolders": {
     "C:\\Users\\User\\.nuget\\packages\\": {}
@@ -87,11 +32,7 @@
         "net8.0": {
           "framework": "net8.0",
           "targetAlias": "net8.0",
-          "projectReferences": {
-            "C:\\Users\\User\\cepx2\\CEPx.Blackboard\\CEPx.Blackboard.csproj": {
-              "projectPath": "C:\\Users\\User\\cepx2\\CEPx.Blackboard\\CEPx.Blackboard.csproj"
-            }
-          }
+          "projectReferences": {}
         }
       },
       "warningProperties": {
