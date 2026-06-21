@@ -1,0 +1,15 @@
+C:\Users\User\cepx2\CEPx.Pipeline\bin\Debug\net8.0\CEPx.Pipeline.deps.json
+C:\Users\User\cepx2\CEPx.Pipeline\bin\Debug\net8.0\CEPx.Pipeline.dll
+C:\Users\User\cepx2\CEPx.Pipeline\bin\Debug\net8.0\CEPx.Pipeline.pdb
+C:\Users\User\cepx2\CEPx.Pipeline\bin\Debug\net8.0\CEPx.Core.dll
+C:\Users\User\cepx2\CEPx.Pipeline\bin\Debug\net8.0\CEPx.Core.pdb
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.csproj.AssemblyReference.cache
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.AssemblyInfoInputs.cache
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.AssemblyInfo.cs
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.csproj.CoreCompileInputs.cache
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pip.A1FD6710.Up2Date
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.dll
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\refint\CEPx.Pipeline.dll
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\CEPx.Pipeline.pdb
+C:\Users\User\cepx2\CEPx.Pipeline\obj\Debug\net8.0\ref\CEPx.Pipeline.dll
