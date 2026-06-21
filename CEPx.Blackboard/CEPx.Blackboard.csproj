@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\CEPx.Core\CEPx.Core.csproj" />
+  </ItemGroup>
+
 </Project>
