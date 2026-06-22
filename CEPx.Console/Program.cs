@@ -2,7 +2,12 @@ using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 
-var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
+Console.WriteLine("Fetching BTCUSDT 1m candles...");
+MarketEvent[] ticks;
+try { ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 100); }
+catch (Exception ex) { Console.WriteLine($"API failed: {ex.Message}. Using synthetic."); ticks = PipelineFunctions.SyntheticTicks("BTCUSDT"); }
+Console.WriteLine($"Loaded {ticks.Length} ticks. Running paper trading...");
+
 var window = new List<MarketEvent>();
 int tickIdx = 0;
 
@@ -59,4 +64,5 @@ if (PolicyEngine.InPosition)
 }
 
 PolicyEngine.PrintEvidenceReport();
-PolicyEngine.SaveTradeCsv("/tmp/cepx_trades.csv");
+PolicyEngine.SaveTradeCsv("/tmp/cepx_live_paper.csv");
+Console.WriteLine("CSV saved: /tmp/cepx_live_paper.csv");
