@@ -11,11 +11,12 @@ public static partial class PipelineFunctions
     private static readonly double[] SWEEP_PROTOTYPE =
         { 0.0, 0.05, 0.12, 0.21, 0.33, 0.48, 0.66, 0.87, 1.12, 1.40 };
 
-    // Extracted from 7 cont + 5 rev user-labeled timestamps (June 20-22, 2026)
-    // Window: T-5..T+4 where T = sweep start
+    // Extracted from 30-day k-means (June 1-30, 2026) — best cluster centroid
+    // C1 "steady fade": 667 continuation samples. Starts high, monotonic decline.
     private static readonly double[] CONTINUATION_PROTOTYPE =
-        { 0.4014, 0.4531, 0.5320, 0.6132, 0.4626, 0.6128, 0.5503, 0.3615, 0.4246, 0.6227 };
+        { 0.8481, 0.8262, 0.7799, 0.7187, 0.6482, 0.5822, 0.4553, 0.3214, 0.2099, 0.1606 };
 
+    // Extracted from 5 user-labeled reversal timestamps (June 20-22, 2026)
     private static readonly double[] REVERSAL_PROTOTYPE =
         { 0.4434, 0.5098, 0.6322, 0.5679, 0.7094, 0.7853, 0.4302, 0.3838, 0.2818, 0.2207 };
 
