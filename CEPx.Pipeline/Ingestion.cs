@@ -81,6 +81,13 @@ public static partial class PipelineFunctions
             new MarketEvent(now+200,   symbol, 42080.0, 1.5, 0, 0, 0),
             new MarketEvent(now+300,   symbol, 42150.0, 2.1, 0, 0, 0),
             new MarketEvent(now+400,   symbol, 42300.0, 5.0, 0, 0, 0),
+            new MarketEvent(now+500,   symbol, 42350.0, 3.0, 0, 0, 0),
+            new MarketEvent(now+600,   symbol, 42400.0, 2.5, 0, 0, 0),
+            new MarketEvent(now+700,   symbol, 42450.0, 2.0, 0, 0, 0),
+            new MarketEvent(now+800,   symbol, 42500.0, 1.0, 0, 0, 0),
+            new MarketEvent(now+900,   symbol, 42550.0, 1.2, 0, 0, 0),
+            new MarketEvent(now+1000,  symbol, 42650.0, 1.5, 0, 0, 0),
+            new MarketEvent(now+1100,  symbol, 42900.0, 6.0, 0, 0, 0),
         };
     }
 }
