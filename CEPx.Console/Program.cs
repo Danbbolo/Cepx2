@@ -42,7 +42,7 @@ Console.WriteLine("=== TOP 5 SHARP_SPIKE CANDIDATES ===\n");
 int num = 1;
 foreach (var sp in spikes.Take(5))
 {
-    var dt = DateTimeOffset.FromUnixTimeMilliseconds(sp.ts).UtcDateTime;
+    var dt = DateTimeOffset.FromUnixTimeMilliseconds(sp.ts).ToOffset(TimeSpan.FromHours(2));
     double sweepPx = sp.raw[sp.raw.Length / 2];
     string shape = string.Join(", ", sp.norm.Select(v => v.ToString("F2")));
 
@@ -53,7 +53,7 @@ foreach (var sp in spikes.Take(5))
     string speed = Math.Abs(retrace) > 0.5 ? "fast" : "slow";
     string desc = $"Rapid move {dir} peaking at candle {peakIdx+1}, {speed} retrace over {sp.norm.Length - peakIdx - 1} candles";
 
-    Console.WriteLine($"{num}. Timestamp: {dt:yyyy-MM-dd HH:mm:ss} UTC");
+    Console.WriteLine($"{num}. Timestamp: {dt:yyyy-MM-dd HH:mm:ss} CEST");
     Console.WriteLine($"   Price: {sweepPx:F0}");
     Console.WriteLine($"   Shape: [{shape}]");
     Console.WriteLine($"   Description: {desc}\n");
