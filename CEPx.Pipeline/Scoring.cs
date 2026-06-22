@@ -11,12 +11,13 @@ public static partial class PipelineFunctions
     private static readonly double[] SWEEP_PROTOTYPE =
         { 0.0, 0.05, 0.12, 0.21, 0.33, 0.48, 0.66, 0.87, 1.12, 1.40 };
 
-    // Extracted from 5 labeled continuation sweeps + 12 labeled reversals (June 18-20, 2026)
+    // Extracted from 7 cont + 5 rev user-labeled timestamps (June 20-22, 2026)
+    // Window: T-5..T+4 where T = sweep start
     private static readonly double[] CONTINUATION_PROTOTYPE =
-        { 0.6035, 0.5956, 0.5979, 0.6671, 0.6651, 0.4611, 0.5536, 0.5997, 0.4464, 0.5495 };
+        { 0.4014, 0.4531, 0.5320, 0.6132, 0.4626, 0.6128, 0.5503, 0.3615, 0.4246, 0.6227 };
 
     private static readonly double[] REVERSAL_PROTOTYPE =
-        { 0.5106, 0.4761, 0.4793, 0.5675, 0.4180, 0.5628, 0.4488, 0.5371, 0.5706, 0.4976 };
+        { 0.4434, 0.5098, 0.6322, 0.5679, 0.7094, 0.7853, 0.4302, 0.3838, 0.2818, 0.2207 };
 
     public static StructuralScore ScoreWithKalman(CepEvent evt, MarketEvent[] window)
     {
