@@ -42,7 +42,7 @@ public static class BlackboardWriter
 
     public static BlackboardState? Read(string symbol)
     {
-        if (_db == null) { Connect(); _db = _redis!.GetDatabase(); }
+        if (_db == null) throw new InvalidOperationException("Not connected. Call Connect() first.");
         var key = $"cepx:blackboard:{symbol}";
         if (!_db.KeyExists(key)) return null;
         var entries = _db.HashGetAll(key).ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
