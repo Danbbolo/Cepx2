@@ -45,6 +45,7 @@ public static class PolicyEngine
         _sweepIsBullish = false;
         _ticksSinceEntry = 0;
         _patternSimHistory.Clear();
+        _entryReasons.Clear();
     }
 
     public static void RecordPatternSimilarity(double sim)
@@ -117,14 +118,32 @@ public static class PolicyEngine
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
         }
 
-        // ── ENTRY check ──
-        if (!InPosition
-            && state.SweepActive
-            && state.PatternFamily == "sweep"
-            && state.PatternSimilarity >= SIMILARITY_THRESHOLD
-            && state.ReversalScore < 0.5
-            && state.AnomalyScore < ANOMALY_THRESHOLD)
-            return new PolicyDecision(state.Timestamp, state.Symbol, "enter", "long", "sweep_confirmed", 1.0);
+        // ── ENTRY: Two-mode Behavior Tree ──
+        if (!InPosition && state.SweepActive && state.AnomalyScore < ANOMALY_THRESHOLD)
+        {
+            bool isBull = isBullishSweep;
+            double vel = state.KalmanVelocity;
+            double rev = state.ReversalScore;
+            string regime = state.Regime;
+
+            // MODE A: Continuation (trend-aligned momentum)
+            bool trendAligned = (isBull && regime == "uptrend") || (!isBull && regime == "downtrend");
+            bool velStrong = (isBull && vel > ENTRY_VELOCITY_THRESHOLD) || (!isBull && vel < -ENTRY_VELOCITY_THRESHOLD);
+            if (trendAligned && velStrong && rev < 0.5)
+            {
+                string side = isBull ? "long" : "short";
+                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a_continuation", 1.0);
+            }
+
+            // MODE B: Reversal (trend exhausted, trap detected)
+            bool trendExhausted = regime == "chop" || regime == "downtrend" || regime == "uptrend";
+            bool velDying = Math.Abs(vel) < FLAT_VELOCITY || (isBull && vel < 0) || (!isBull && vel > 0);
+            if (rev > 0.5 && velDying && trendExhausted)
+            {
+                string side = isBull ? "short" : "long"; // fade the sweep
+                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b_reversal", 1.0);
+            }
+        }
 
         return new PolicyDecision(state.Timestamp, state.Symbol, "noop", "", "", 0.0);
     }
@@ -145,7 +164,7 @@ public static class PolicyEngine
             _ticksSinceEntry = 0;
             _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
-            if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex);
+            if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);
         }
         else if (decision.Action == "exit" && InPosition)
         {
@@ -170,6 +189,12 @@ public static class PolicyEngine
     {
         double winRate = TotalTrades > 0 ? (double)WinningTrades / TotalTrades * 100 : 0;
         Console.WriteLine($"Summary: {TotalTrades} trades, {winRate:F0}% win, Total PnL: {TotalPnL:F2}%");
+        // Mode breakdown
+        var modes = _entryReasons.GroupBy(r => r)
+            .Select(g => $"{g.Key}: {g.Count()}")
+            .ToArray();
+        if (modes.Length > 0)
+            Console.WriteLine($"Modes: {string.Join(" | ", modes)}");
         // Exit breakdown
         var breakdown = _exitReasons.GroupBy(r => r)
             .Select(g => $"{g.Count()} {g.Key}")
@@ -182,18 +207,19 @@ public static class PolicyEngine
 
     private static readonly List<long> _entryTimes = new(), _exitTimes = new();
     private static readonly List<double> _entryPrices = new(), _exitPrices = new(), _pnls = new(), _similarities = new(), _velocities = new();
-    private static readonly List<string> _detectors = new(), _exitReasons = new();
+    private static readonly List<string> _detectors = new(), _exitReasons = new(), _entryReasons = new();
     private static readonly List<int> _holdingTicks = new();
     private static double _pendingEntryPrice, _pendingSimilarity, _pendingVelocity;
     private static string _pendingDetector = "";
     private static int _pendingEntryTick;
     private static bool _hasPending;
 
-    public static void LogEnter(double entryPrice, string detector, double similarity, double velocity, int tickIndex)
+    public static void LogEnter(double entryPrice, string detector, double similarity, double velocity, int tickIndex, string entryReason = "")
     {
         _pendingEntryPrice = entryPrice; _pendingDetector = detector;
         _pendingSimilarity = similarity; _pendingVelocity = velocity;
         _pendingEntryTick = tickIndex; _hasPending = true;
+        _entryReasons.Add(entryReason);
     }
 
     public static void LogExit(double exitPrice, string reason, int tickIndex)
