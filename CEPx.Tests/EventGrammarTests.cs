@@ -89,4 +89,86 @@ public class EventGrammarTests
         var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
         Assert.Equal(0L, ticks[0].Timestamp);
     }
+
+    [Fact]
+    public void Reclaim_fires_when_bullish_sweep_price_is_reclaimed()
+    {
+        var window = new MarketEvent[]
+        {
+            new(0,   "BTCUSDT", 42350.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42200.0, 1.0, 0, 0, 0),
+            new(200, "BTCUSDT", 42100.0, 1.0, 0, 0, 0),
+        };
+        var result = PipelineFunctions.DetectReclaim(window, 42300.0, true);
+        Assert.NotNull(result);
+        Assert.Equal("Reclaim", result.Value.Type);
+    }
+
+    [Fact]
+    public void Reclaim_does_not_fire_when_price_has_not_reclaimed()
+    {
+        var window = new MarketEvent[]
+        {
+            new(0,   "BTCUSDT", 42500.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42450.0, 1.0, 0, 0, 0),
+            new(200, "BTCUSDT", 42400.0, 1.0, 0, 0, 0),
+        };
+        var result = PipelineFunctions.DetectReclaim(window, 42300.0, true);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Absorption_fires_on_volume_spike_with_no_price_move()
+    {
+        var window = new MarketEvent[]
+        {
+            new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(200, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(300, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(400, "BTCUSDT", 42000.0, 4.0, 0, 0, 0),
+        };
+        var result = PipelineFunctions.DetectAbsorption(window);
+        Assert.NotNull(result);
+        Assert.Equal("AbsorptionAfterSweep", result.Value.Type);
+    }
+
+    [Fact]
+    public void Absorption_does_not_fire_when_price_moves_with_volume()
+    {
+        var window = new MarketEvent[]
+        {
+            new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(200, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(300, "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(400, "BTCUSDT", 42100.0, 4.0, 0, 0, 0),
+        };
+        var result = PipelineFunctions.DetectAbsorption(window);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void BreakoutAttempt_fires_on_bullish_breakout()
+    {
+        var window = new MarketEvent[11];
+        for (int i = 0; i < 10; i++)
+            window[i] = new MarketEvent(i * 100L, "BTCUSDT", 42000.0 + i * 10, 1.0, 0, 0, 0);
+        window[10] = new MarketEvent(1000, "BTCUSDT", 42300.0, 1.0, 0, 0, 0);
+        var result = PipelineFunctions.DetectBreakoutAttempt(window);
+        Assert.NotNull(result);
+        Assert.Equal("BreakoutAttempt", result.Value.Type);
+        Assert.Equal("bullish", result.Value.Context);
+    }
+
+    [Fact]
+    public void BreakoutAttempt_does_not_fire_inside_range()
+    {
+        var window = new MarketEvent[11];
+        for (int i = 0; i < 10; i++)
+            window[i] = new MarketEvent(i * 100L, "BTCUSDT", 42000.0 + i * 10, 1.0, 0, 0, 0);
+        window[10] = new MarketEvent(1000, "BTCUSDT", 42050.0, 1.0, 0, 0, 0);
+        var result = PipelineFunctions.DetectBreakoutAttempt(window);
+        Assert.Null(result);
+    }
 }
