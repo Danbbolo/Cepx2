@@ -77,6 +77,7 @@ public static class PipelineFunctions
             p01 = (1.0 - k0) * pp01;
             p10 = pp10 - k1 * pp00;
             p11 = pp11 - k1 * pp01;
+            p01 = p10 = (p01 + p10) / 2.0;
         }
 
         double unc = Math.Sqrt(Math.Abs(p00));
@@ -162,6 +163,8 @@ public static class PipelineFunctions
             }
 
             double cRange = cMax - cMin;
+            if (cRange == 0)
+                return new StructuralScore(score.Timestamp, score.Symbol, score.StateMean, score.StateVelocity, score.UncertaintyUpper, score.UncertaintyLower, score.PatternFamily, 0.0, score.AnomalyScore);
             if (cRange > 0)
                 for (int i = 0; i < 10; i++)
                     candidate[i] = (candidate[i] - cMin) / cRange;
@@ -296,7 +299,7 @@ public static class PipelineFunctions
 
     public static MarketEvent[] SyntheticTicks(string symbol)
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = 0L;
         return new[]
         {
             new MarketEvent(now,       symbol, 42000.0, 1.0, 0, 0, 0),
