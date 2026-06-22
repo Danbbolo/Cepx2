@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CEPx.Core\CEPx.Core.csproj" />
+    <PackageReference Include="StackExchange.Redis" Version="2.7.27" />
   </ItemGroup>
 
 </Project>
