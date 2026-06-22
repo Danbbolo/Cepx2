@@ -90,7 +90,7 @@ static BlackboardState WriteState(StructuralScore score)
     return new BlackboardState(
         score.Timestamp,
         score.Symbol,
-        score.PatternFamily == "sweep" && score.PatternSimilarity > 0.5,
+        score.PatternFamily == "sweep",
         score.PatternFamily,
         score.PatternSimilarity,
         score.StateVelocity,
