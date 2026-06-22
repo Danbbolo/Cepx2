@@ -10,8 +10,14 @@ public static class PolicyEngine
     // ── Paper trading ─────────────────────────────────────────────────
     private const double COMMISSION_PCT = 0.05;
     private const double SLIPPAGE_PCT = 0.01;
-    private const int MAX_HOLD_TICKS = 20;
-    private const double STOP_LOSS_PCT = -0.5;
+    private const int MAX_HOLD_TICKS = 40;
+    private const double STOP_LOSS_PCT = -1.0;
+    private const double MOMENTUM_DECAY_SIM = 0.20;
+    private const int DECLINE_TICKS = 3;
+    private const double FLAT_VELOCITY = 0.1;
+    private const double TRAPPED_REV_THRESHOLD = 0.3;
+    private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
+    private const int TRAPPED_MAX_TICKS = 5;
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -22,18 +28,75 @@ public static class PolicyEngine
     public static int WinningTrades;
     public static double TotalPnL;
 
+    // ── Structural exit state ─────────────────────────────────────────
+    private static readonly List<double> _patternSimHistory = new();
+    private static double _sweepOriginPrice;
+    private static bool _sweepIsBullish;
+    private static int _ticksSinceEntry;
+
+    public static void Reset()
+    {
+        InPosition = false;
+        PositionSide = "";
+        EntryPrice = 0;
+        EntryTick = 0;
+        _sweepOriginPrice = 0;
+        _sweepIsBullish = false;
+        _ticksSinceEntry = 0;
+        _patternSimHistory.Clear();
+    }
+
+    public static void RecordPatternSimilarity(double sim)
+    {
+        _patternSimHistory.Add(sim);
+        if (_patternSimHistory.Count > 50) _patternSimHistory.RemoveAt(0);
+    }
+
+    private static bool IsPatternSimilarityDeclining()
+    {
+        int n = _patternSimHistory.Count;
+        if (n < DECLINE_TICKS) return false;
+        for (int i = n - DECLINE_TICKS; i < n - 1; i++)
+            if (_patternSimHistory[i] <= _patternSimHistory[i + 1])
+                return false;
+        return true;
+    }
+
     // ── Policy ────────────────────────────────────────────────────────
 
-    public static PolicyDecision Decide(BlackboardState state, int currentTickIndex = 0, double currentPrice = 0)
+    public static PolicyDecision Decide(BlackboardState state, int currentTickIndex = 0, double currentPrice = 0, double sweepOriginPrice = 0, bool isBullishSweep = false)
     {
-        // ── EXIT checks (priority: before entry) ──
         if (InPosition)
         {
-            // Time stop
+            _ticksSinceEntry++;
+
+            // 1. Momentum Decay (HIGHEST)
+            bool simBelowThreshold = state.PatternSimilarity < MOMENTUM_DECAY_SIM;
+            bool simDeclining = IsPatternSimilarityDeclining();
+            bool flatAndDeclining = Math.Abs(state.KalmanVelocity) < FLAT_VELOCITY && simDeclining;
+            if (simBelowThreshold || flatAndDeclining || simDeclining)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "momentum_decay", 1.0);
+
+            // 2. Structural Invalidation
+            if (currentPrice > 0 && sweepOriginPrice > 0)
+            {
+                if (PositionSide == "long" && isBullishSweep && currentPrice < sweepOriginPrice)
+                    return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "structural_invalidation", 1.0);
+                if (PositionSide == "short" && !isBullishSweep && currentPrice > sweepOriginPrice)
+                    return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "structural_invalidation", 1.0);
+            }
+
+            // 3. Trapped Order Flow
+            if (_ticksSinceEntry <= TRAPPED_MAX_TICKS
+                && state.ReversalScore > TRAPPED_REV_THRESHOLD
+                && state.AnomalyScore > TRAPPED_ANOMALY_THRESHOLD)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "trapped_order_flow", 1.0);
+
+            // 4. Time Stop (safety net)
             if (currentTickIndex - EntryTick >= MAX_HOLD_TICKS)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "time_stop", 1.0);
 
-            // Stop loss
+            // 5. Stop Loss
             if (currentPrice > 0)
             {
                 double unrealizedPnl = (currentPrice - EntryPrice) / EntryPrice * 100.0;
@@ -42,11 +105,11 @@ public static class PolicyEngine
                     return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "stop_loss", 1.0);
             }
 
-            // Reversal signal
+            // 6. Reversal Signal
             if (state.ReversalScore >= 0.5)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "reversal_signal", 1.0);
 
-            // Velocity flip
+            // 7. Velocity Flip
             if (PositionSide == "long" && state.KalmanVelocity < 0)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
             if (PositionSide == "short" && state.KalmanVelocity > 0)
@@ -67,7 +130,7 @@ public static class PolicyEngine
 
     // ── Paper execution ───────────────────────────────────────────────
 
-    public static void PaperExecute(PolicyDecision decision, double currentPrice, string detector = "", double similarity = 0, double velocity = 0, int tickIndex = 0)
+    public static void PaperExecute(PolicyDecision decision, double currentPrice, string detector = "", double similarity = 0, double velocity = 0, int tickIndex = 0, double sweepOriginPrice = 0, bool isBullishSweep = false)
     {
         if (decision.Action == "enter" && !InPosition)
         {
@@ -76,6 +139,10 @@ public static class PolicyEngine
             InPosition = true;
             PositionSide = decision.Side;
             EntryTick = tickIndex;
+            _sweepOriginPrice = sweepOriginPrice;
+            _sweepIsBullish = isBullishSweep;
+            _ticksSinceEntry = 0;
+            _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex);
         }
@@ -88,10 +155,13 @@ public static class PolicyEngine
             TotalTrades++;
             if (pnl > 0) WinningTrades++;
             TotalPnL += pnl;
-            Console.WriteLine($"PAPER EXIT @ {exitPrice:F2} PnL: {pnl:F2}%");
+            Console.WriteLine($"PAPER EXIT @ {exitPrice:F2} PnL: {pnl:F2}% reason: {decision.Reason}");
             LogExit(exitPrice, decision.Reason, tickIndex);
             InPosition = false;
             PositionSide = "";
+            _sweepOriginPrice = 0;
+            _patternSimHistory.Clear();
+            _ticksSinceEntry = 0;
         }
     }
 
