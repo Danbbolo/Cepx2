@@ -2,12 +2,12 @@ using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 
-// ── June 18 2026 BTC/USDT 1m — with EXTRACTED prototypes ──
-long endUTC = new DateTimeOffset(2026, 6, 19, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+// ── June 22 2026 BTC/USDT 1m — with EXTRACTED prototypes ──
+long endUTC = new DateTimeOffset(2026, 6, 23, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, endMs: endUTC);
 if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
-Console.WriteLine($"=== EXTRACTED PROTOTYPES — June 18, {ticks.Length} candles ===\n");
+Console.WriteLine($"=== EXTRACTED PROTOTYPES — June 22, {ticks.Length} candles ===\n");
 
 // Reset all state
 PolicyEngine.InPosition = false;
