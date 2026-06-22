@@ -3,8 +3,9 @@ using CEPx.Pipeline;
 using CEPx.Policy;
 
 // ── June 22 2026 BTC/USDT 1m — two-mode BT ──
-long endUTC = new DateTimeOffset(2026, 6, 23, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
-var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, endMs: endUTC);
+long startUTC = new DateTimeOffset(2026, 6, 22, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+long endUTC = new DateTimeOffset(2026, 6, 22, 23, 59, 59, TimeSpan.Zero).ToUnixTimeMilliseconds();
+var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, startMs: startUTC, endMs: endUTC);
 if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
 Console.WriteLine($"=== TWO-MODE BT — June 22, {ticks.Length} candles ===\n");
