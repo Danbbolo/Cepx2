@@ -1,4 +1,4 @@
-﻿using CEPx.Core;
+using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 
