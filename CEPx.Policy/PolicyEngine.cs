@@ -24,9 +24,38 @@ public static class PolicyEngine
 
     // ── Policy ────────────────────────────────────────────────────────
 
-    public static PolicyDecision Decide(BlackboardState state)
+    public static PolicyDecision Decide(BlackboardState state, int currentTickIndex = 0, double currentPrice = 0)
     {
-        if (state.SweepActive
+        // ── EXIT checks (priority: before entry) ──
+        if (InPosition)
+        {
+            // Time stop
+            if (currentTickIndex - EntryTick >= MAX_HOLD_TICKS)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "time_stop", 1.0);
+
+            // Stop loss
+            if (currentPrice > 0)
+            {
+                double unrealizedPnl = (currentPrice - EntryPrice) / EntryPrice * 100.0;
+                if (PositionSide == "short") unrealizedPnl = -unrealizedPnl;
+                if (unrealizedPnl <= STOP_LOSS_PCT)
+                    return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "stop_loss", 1.0);
+            }
+
+            // Reversal signal
+            if (state.ReversalScore >= 0.5)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "reversal_signal", 1.0);
+
+            // Velocity flip
+            if (PositionSide == "long" && state.KalmanVelocity < 0)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
+            if (PositionSide == "short" && state.KalmanVelocity > 0)
+                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
+        }
+
+        // ── ENTRY check ──
+        if (!InPosition
+            && state.SweepActive
             && state.PatternFamily == "sweep"
             && state.PatternSimilarity >= SIMILARITY_THRESHOLD
             && state.ReversalScore < 0.5
