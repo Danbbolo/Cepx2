@@ -22,12 +22,16 @@ public class PolicyTests
     public void Exit_fires_on_momentum_decay_sim_below_020()
     {
         ResetPosition();
+        // Feed declining sim history (required: BOTH sim<0.20 AND declining)
+        PolicyEngine.RecordPatternSimilarity(0.30);
+        PolicyEngine.RecordPatternSimilarity(0.25);
+        PolicyEngine.RecordPatternSimilarity(0.20);
         var state = MakeState(patternSimilarity: 0.15);
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // Need 3 consecutive ticks for momentum_decay hysteresis
+        // Need 3 consecutive ticks for hysteresis
         PolicyDecision result = default;
         for (int i = 0; i < 3; i++)
             result = PolicyEngine.Decide(state, currentTickIndex: 5 + i, currentPrice: 42100);
@@ -40,10 +44,10 @@ public class PolicyTests
     {
         ResetPosition();
         // Feed declining pattern similarities
-        PolicyEngine.RecordPatternSimilarity(0.5);
-        PolicyEngine.RecordPatternSimilarity(0.4);
-        PolicyEngine.RecordPatternSimilarity(0.3);
-        var state = MakeState(patternSimilarity: 0.25);
+        PolicyEngine.RecordPatternSimilarity(0.25);
+        PolicyEngine.RecordPatternSimilarity(0.22);
+        PolicyEngine.RecordPatternSimilarity(0.19);
+        var state = MakeState(patternSimilarity: 0.16); // BOTH <0.20 AND declining
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;

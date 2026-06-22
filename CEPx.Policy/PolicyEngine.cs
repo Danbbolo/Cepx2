@@ -23,6 +23,7 @@ public static class PolicyEngine
     private const int VELOCITY_FLIP_CONFIRM = 2;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
     private const int VELOCITY_HISTORY_TICKS = 5;
+    private const int MODE_B_MAX_SWEEP_AGE = 8;
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -40,6 +41,7 @@ public static class PolicyEngine
     private static int _ticksSinceEntry;
     private static int _momentumDecayCount;
     private static int _velocityFlipCount;
+    private static int _lastSweepTick = -999;
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -96,16 +98,16 @@ public static class PolicyEngine
     {
         // Record velocity every tick for direction-change detection
         RecordVelocity(state.KalmanVelocity);
+        if (state.SweepActive) _lastSweepTick = currentTickIndex;
 
         if (InPosition)
         {
             _ticksSinceEntry++;
 
-            // 1. Momentum Decay (HIGHEST) — requires 3 consecutive confirmations
+            // 1. Momentum Decay (HIGHEST) — requires BOTH sim<0.20 AND declining for 3 ticks
             bool simBelowThreshold = state.PatternSimilarity < MOMENTUM_DECAY_SIM;
             bool simDeclining = IsPatternSimilarityDeclining();
-            bool flatAndDeclining = Math.Abs(state.KalmanVelocity) < FLAT_VELOCITY && simDeclining;
-            if (simBelowThreshold || flatAndDeclining || simDeclining)
+            if (simBelowThreshold && simDeclining)
                 _momentumDecayCount++;
             else
                 _momentumDecayCount = 0;
@@ -169,7 +171,7 @@ public static class PolicyEngine
             if (trendAligned && velStrong && rev < 0.5)
             {
                 string side = isBull ? "long" : "short";
-                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a_continuation", 1.0);
+                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a", 1.0);
             }
 
             // MODE B: Reversal (sweep exhausted, trap detected)
@@ -180,10 +182,11 @@ public static class PolicyEngine
                 || Math.Abs(vel) < FLAT_VELOCITY
                 || (isBull && vel < 0)
                 || (!isBull && vel > 0);
-            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk)
+            bool sweepRecent = (currentTickIndex - _lastSweepTick) <= MODE_B_MAX_SWEEP_AGE;
+            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent)
             {
                 string side = isBull ? "short" : "long"; // fade the sweep
-                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b_reversal", 1.0);
+                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);
             }
         }
 
