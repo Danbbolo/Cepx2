@@ -117,23 +117,14 @@ public static class PolicyEngine
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
         }
 
-        // ── ENTRY check (structural-only, no DTW threshold) ──
-        if (!InPosition && state.SweepActive)
-        {
-            if (isBullishSweep
-                && state.Regime == "uptrend"
-                && state.KalmanVelocity > ENTRY_VELOCITY_THRESHOLD
-                && state.ReversalScore < 0.5
-                && state.AnomalyScore < ANOMALY_THRESHOLD)
-                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", "long", "sweep_confirmed", 1.0);
-
-            if (!isBullishSweep
-                && state.Regime == "downtrend"
-                && state.KalmanVelocity < -ENTRY_VELOCITY_THRESHOLD
-                && state.ReversalScore < 0.5
-                && state.AnomalyScore < ANOMALY_THRESHOLD)
-                return new PolicyDecision(state.Timestamp, state.Symbol, "enter", "short", "sweep_confirmed", 1.0);
-        }
+        // ── ENTRY check ──
+        if (!InPosition
+            && state.SweepActive
+            && state.PatternFamily == "sweep"
+            && state.PatternSimilarity >= SIMILARITY_THRESHOLD
+            && state.ReversalScore < 0.5
+            && state.AnomalyScore < ANOMALY_THRESHOLD)
+            return new PolicyDecision(state.Timestamp, state.Symbol, "enter", "long", "sweep_confirmed", 1.0);
 
         return new PolicyDecision(state.Timestamp, state.Symbol, "noop", "", "", 0.0);
     }
