@@ -19,6 +19,9 @@ public static class PolicyEngine
     private const double TRAPPED_REV_THRESHOLD = 0.3;
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
     private const int TRAPPED_MAX_TICKS = 5;
+    private const int MOMENTUM_DECAY_CONFIRM = 3;
+    private const int VELOCITY_FLIP_CONFIRM = 2;
+    private const double MODE_B_REVERSAL_THRESHOLD = 0.3;
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -34,6 +37,8 @@ public static class PolicyEngine
     private static double _sweepOriginPrice;
     private static bool _sweepIsBullish;
     private static int _ticksSinceEntry;
+    private static int _momentumDecayCount;
+    private static int _velocityFlipCount;
 
     public static void Reset()
     {
@@ -44,6 +49,8 @@ public static class PolicyEngine
         _sweepOriginPrice = 0;
         _sweepIsBullish = false;
         _ticksSinceEntry = 0;
+        _momentumDecayCount = 0;
+        _velocityFlipCount = 0;
         _patternSimHistory.Clear();
         _entryReasons.Clear();
     }
@@ -72,11 +79,15 @@ public static class PolicyEngine
         {
             _ticksSinceEntry++;
 
-            // 1. Momentum Decay (HIGHEST)
+            // 1. Momentum Decay (HIGHEST) — requires 3 consecutive confirmations
             bool simBelowThreshold = state.PatternSimilarity < MOMENTUM_DECAY_SIM;
             bool simDeclining = IsPatternSimilarityDeclining();
             bool flatAndDeclining = Math.Abs(state.KalmanVelocity) < FLAT_VELOCITY && simDeclining;
             if (simBelowThreshold || flatAndDeclining || simDeclining)
+                _momentumDecayCount++;
+            else
+                _momentumDecayCount = 0;
+            if (_momentumDecayCount >= MOMENTUM_DECAY_CONFIRM)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "momentum_decay", 1.0);
 
             // 2. Structural Invalidation
@@ -111,10 +122,14 @@ public static class PolicyEngine
             if (state.ReversalScore >= 0.5)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "reversal_signal", 1.0);
 
-            // 7. Velocity Flip
-            if (PositionSide == "long" && state.KalmanVelocity < 0)
-                return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
-            if (PositionSide == "short" && state.KalmanVelocity > 0)
+            // 7. Velocity Flip — requires 2 consecutive confirmations
+            bool velWrong = (PositionSide == "long" && state.KalmanVelocity < 0)
+                         || (PositionSide == "short" && state.KalmanVelocity > 0);
+            if (velWrong)
+                _velocityFlipCount++;
+            else
+                _velocityFlipCount = 0;
+            if (_velocityFlipCount >= VELOCITY_FLIP_CONFIRM)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
         }
 
@@ -136,9 +151,11 @@ public static class PolicyEngine
             }
 
             // MODE B: Reversal (trend exhausted, trap detected)
-            bool trendExhausted = regime == "chop" || regime == "downtrend" || regime == "uptrend";
+            bool revRegimeOk = regime == "chop"
+                || (isBull && regime == "downtrend")
+                || (!isBull && regime == "uptrend");
             bool velDying = Math.Abs(vel) < FLAT_VELOCITY || (isBull && vel < 0) || (!isBull && vel > 0);
-            if (rev > 0.5 && velDying && trendExhausted)
+            if (rev >= MODE_B_REVERSAL_THRESHOLD && velDying && revRegimeOk)
             {
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b_reversal", 1.0);
@@ -162,6 +179,8 @@ public static class PolicyEngine
             _sweepOriginPrice = sweepOriginPrice;
             _sweepIsBullish = isBullishSweep;
             _ticksSinceEntry = 0;
+            _momentumDecayCount = 0;
+            _velocityFlipCount = 0;
             _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);

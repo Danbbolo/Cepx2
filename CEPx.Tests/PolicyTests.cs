@@ -27,7 +27,10 @@ public class PolicyTests
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        var result = PolicyEngine.Decide(state, currentTickIndex: 5, currentPrice: 42100);
+        // Need 3 consecutive ticks for momentum_decay hysteresis
+        PolicyDecision result = default;
+        for (int i = 0; i < 3; i++)
+            result = PolicyEngine.Decide(state, currentTickIndex: 5 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("momentum_decay", result.Reason);
     }
@@ -45,7 +48,10 @@ public class PolicyTests
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        var result = PolicyEngine.Decide(state, currentTickIndex: 5, currentPrice: 42100);
+        // Need 3 consecutive ticks for hysteresis
+        PolicyDecision result = default;
+        for (int i = 0; i < 3; i++)
+            result = PolicyEngine.Decide(state, currentTickIndex: 5 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("momentum_decay", result.Reason);
     }
@@ -152,7 +158,10 @@ public class PolicyTests
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        var result = PolicyEngine.Decide(state, currentTickIndex: 10, currentPrice: 42100);
+        // Need 2 consecutive ticks for velocity_flip hysteresis
+        PolicyDecision result = default;
+        for (int i = 0; i < 2; i++)
+            result = PolicyEngine.Decide(state, currentTickIndex: 10 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("velocity_flip", result.Reason);
 
@@ -163,7 +172,9 @@ public class PolicyTests
         PolicyEngine.PositionSide = "short";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        var result2 = PolicyEngine.Decide(state2, currentTickIndex: 10, currentPrice: 41900);
+        PolicyDecision result2 = default;
+        for (int i = 0; i < 2; i++)
+            result2 = PolicyEngine.Decide(state2, currentTickIndex: 10 + i, currentPrice: 41900);
         Assert.Equal("exit", result2.Action);
         Assert.Equal("velocity_flip", result2.Reason);
     }
