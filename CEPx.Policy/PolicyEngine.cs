@@ -169,6 +169,12 @@ public static class PolicyEngine
     {
         double winRate = TotalTrades > 0 ? (double)WinningTrades / TotalTrades * 100 : 0;
         Console.WriteLine($"Summary: {TotalTrades} trades, {winRate:F0}% win, Total PnL: {TotalPnL:F2}%");
+        // Exit breakdown
+        var breakdown = _exitReasons.GroupBy(r => r)
+            .Select(g => $"{g.Count()} {g.Key}")
+            .ToArray();
+        if (breakdown.Length > 0)
+            Console.WriteLine($"Exit breakdown: {string.Join(" | ", breakdown)}");
     }
 
     // ── Trade log for evidence ────────────────────────────────────────

@@ -67,6 +67,10 @@ for (int i = 0; i < ticks.Length; i++)
         PolicyEngine.PaperExecute(decision, ticks[i].Price, "sweep", score.PatternSimilarity, score.StateVelocity, i, sweepOrigin, isBullish);
         btEntries.Add((sweep.Value, i));
     }
+    else if (PolicyEngine.InPosition)
+    {
+        continue; // skip sweeps during open position — don't pollute rejects
+    }
     else
     {
         string reason;
