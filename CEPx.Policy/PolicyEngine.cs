@@ -21,7 +21,9 @@ public static class PolicyEngine
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
     private const int TRAPPED_MAX_TICKS = 5;
     private const int MOMENTUM_DECAY_CONFIRM = 4;
-    private const int VELOCITY_FLIP_CONFIRM = 2;
+    private const int VELOCITY_FLIP_CONFIRM = 5;
+    private const double VELOCITY_FLIP_MIN_MAGNITUDE = 0.5;
+    private const double VELOCITY_FLIP_SIM_GATE = 0.30;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const int MODE_B_MAX_SWEEP_AGE = 8;
@@ -160,10 +162,11 @@ public static class PolicyEngine
             if (state.ReversalScore >= 0.5)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "reversal_signal", 1.0);
 
-            // 7. Velocity Flip — requires 2 consecutive confirmations
-            bool velWrong = (PositionSide == "long" && state.KalmanVelocity < 0)
-                         || (PositionSide == "short" && state.KalmanVelocity > 0);
-            if (velWrong)
+            // 7. Velocity Flip — only fire if pattern thesis is ALSO dying (sim < 0.30)
+            bool velWrong = (PositionSide == "long" && state.KalmanVelocity < -VELOCITY_FLIP_MIN_MAGNITUDE)
+                         || (PositionSide == "short" && state.KalmanVelocity > VELOCITY_FLIP_MIN_MAGNITUDE);
+            bool patternDying = state.PatternSimilarity < VELOCITY_FLIP_SIM_GATE;
+            if (velWrong && patternDying)
                 _velocityFlipCount++;
             else
                 _velocityFlipCount = 0;
