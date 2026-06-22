@@ -188,10 +188,12 @@ public static partial class PipelineFunctions
         };
     }
 
-    public static MarketEvent[] FetchBinanceHistorical(string symbol, string interval = "1m", int limit = 100)
+    public static MarketEvent[] FetchBinanceHistorical(string symbol, string interval = "1m", int limit = 100, long startMs = 0, long endMs = 0)
     {
         using var http = new HttpClient();
         var url = $"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}";
+        if (startMs > 0) url += $"&startTime={startMs}";
+        if (endMs > 0) url += $"&endTime={endMs}";
         var json = http.GetStringAsync(url).Result;
         using var doc = JsonDocument.Parse(json);
         var rows = doc.RootElement.EnumerateArray();
