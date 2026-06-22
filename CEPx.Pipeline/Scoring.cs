@@ -11,11 +11,12 @@ public static partial class PipelineFunctions
     private static readonly double[] SWEEP_PROTOTYPE =
         { 0.0, 0.05, 0.12, 0.21, 0.33, 0.48, 0.66, 0.87, 1.12, 1.40 };
 
+    // Extracted from 30 days BTC/USDT 1m (June 1-30, 2026) — 1389 cont / 1306 rev samples
     private static readonly double[] CONTINUATION_PROTOTYPE =
-        { 0.0, 0.3, 0.8, 1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7 };
+        { 0.9889, 1.0000, 0.8516, 0.7564, 0.7260, 0.6322, 0.6253, 0.4504, 0.2142, 0.0000 };
 
     private static readonly double[] REVERSAL_PROTOTYPE =
-        { 0.0, 0.3, 0.8, 1.0, 0.5, 0.2, 0.1, 0.05, 0.0, 0.0 };
+        { 1.0000, 0.8777, 0.8015, 0.5314, 0.2426, 0.1749, 0.0000, 0.1726, 0.3629, 0.4969 };
 
     public static StructuralScore ScoreWithKalman(CepEvent evt, MarketEvent[] window)
     {

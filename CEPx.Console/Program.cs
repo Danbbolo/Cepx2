@@ -2,12 +2,12 @@ using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 
-// ── June 18 2026 BTC/USDT 1m ──
+// ── June 18 2026 BTC/USDT 1m — with EXTRACTED prototypes ──
 long endUTC = new DateTimeOffset(2026, 6, 19, 0, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
 var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, endMs: endUTC);
 if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
-Console.WriteLine($"=== STRUCTURAL EXITS — June 18, {ticks.Length} candles ===\n");
+Console.WriteLine($"=== EXTRACTED PROTOTYPES — June 18, {ticks.Length} candles ===\n");
 
 // Reset all state
 PolicyEngine.InPosition = false;
@@ -24,7 +24,6 @@ for (int i = 0; i < ticks.Length; i++)
 {
     buf[i % 10] = ticks[i];
 
-    // ── EXIT CHECK: every tick when in position ──
     if (PolicyEngine.InPosition && i >= 9)
     {
         var w10 = new MarketEvent[10];
@@ -35,12 +34,9 @@ for (int i = 0; i < ticks.Length; i++)
         PolicyEngine.RecordPatternSimilarity(exitState.PatternSimilarity);
         var exitDecision = PolicyEngine.Decide(exitState, i, ticks[i].Price);
         if (exitDecision.Action == "exit")
-        {
             PolicyEngine.PaperExecute(exitDecision, ticks[i].Price, "exit", exitScore.PatternSimilarity, exitScore.StateVelocity, i);
-        }
     }
 
-    // ── SWEEP DETECTION (L2) ──
     if (i < 5) continue;
     var w5 = new MarketEvent[5];
     for (int j = 0; j < 5; j++) w5[j] = buf[(i - 4 + j) % 10];
@@ -48,18 +44,14 @@ for (int i = 0; i < ticks.Length; i++)
     if (sweep == null) continue;
     detectorHits.Add((sweep.Value, i));
 
-    // ── SCORE + BT FILTER (L2.5 + L4) ──
     if (i < 9) continue;
     var scoreW10 = new MarketEvent[10];
     for (int j = 0; j < 10; j++) scoreW10[j] = buf[(i - 9 + j) % 10];
-
     var score = PipelineFunctions.ScoreEvent(sweep.Value, scoreW10);
     var state = PipelineFunctions.WriteState(score, scoreW10);
 
-    // Compute sweep origin (price at start of 5-tick sweep window)
     double sweepOrigin = w5[0].Price;
     bool isBullish = sweep.Value.Context == "bullish";
-
     var decision = PolicyEngine.Decide(state, i, ticks[i].Price, sweepOrigin, isBullish);
 
     if (decision.Action == "enter")
@@ -69,7 +61,7 @@ for (int i = 0; i < ticks.Length; i++)
     }
     else if (PolicyEngine.InPosition)
     {
-        continue; // skip sweeps during open position — don't pollute rejects
+        continue;
     }
     else
     {
@@ -81,11 +73,9 @@ for (int i = 0; i < ticks.Length; i++)
     }
 }
 
-// ── Report ──
-Console.WriteLine($"\nDetector hits: {detectorHits.Count}");
+Console.WriteLine($"Detector hits: {detectorHits.Count}");
 Console.WriteLine($"BT entries:    {btEntries.Count}");
-Console.WriteLine($"BT rejects:    {btRejects.Count}");
-Console.WriteLine();
+Console.WriteLine($"BT rejects:    {btRejects.Count}\n");
 
 Console.WriteLine("=== BT ENTRIES ===");
 foreach (var (sweep, idx) in btEntries)
