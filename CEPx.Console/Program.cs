@@ -15,9 +15,6 @@ var ticks = new MarketEvent[]
     new(now+800, "BTCUSDT", 42500.0, 1.8, 0, 0, 0),
     new(now+900, "BTCUSDT", 42550.0, 1.5, 0, 0, 0),
 };
-var sweep = PipelineFunctions.DetectSweepStart(ticks);
-if (sweep.HasValue)
-{
-    var score = PipelineFunctions.ScoreEvent(sweep.Value, ticks);
-    Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2} upper={score.UncertaintyUpper:F2} lower={score.UncertaintyLower:F2}");
-}
+var sweep = new CepEvent(now+400, "BTCUSDT", "SweepStart", 42300.0, "");
+var score = PipelineFunctions.ScoreEvent(sweep, ticks);
+Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2} upper={score.UncertaintyUpper:F2} lower={score.UncertaintyLower:F2} sim={score.PatternSimilarity:F4}");
