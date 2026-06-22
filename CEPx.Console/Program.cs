@@ -13,10 +13,38 @@ foreach (var tick in ticks)
     if (window.Count < 5) continue;
 
     var w = window.TakeLast(5).ToArray();
+    var full = window.ToArray();
+
+    // Exit checks while in position
+    if (PolicyEngine.InPosition)
+    {
+        string? exitReason = null;
+        if (PipelineFunctions.DetectReclaim(full, PolicyEngine.RawEntryPrice, PolicyEngine.PositionSide == "long") != null)
+            exitReason = "reclaim";
+        else if (PipelineFunctions.DetectExhaustionPulse(full) != null)
+            exitReason = "exhaustion";
+        else if (tickIdx - PolicyEngine.EntryTick > 20)
+            exitReason = "timeout";
+        else
+        {
+            double pnl = (tick.Price - PolicyEngine.RawEntryPrice) / PolicyEngine.RawEntryPrice * 100;
+            if (PolicyEngine.PositionSide == "short") pnl = -pnl;
+            if (pnl < -0.5) exitReason = "stoploss";
+        }
+
+        if (exitReason != null)
+        {
+            PolicyEngine.PaperExecute(
+                new PolicyDecision(0, "BTCUSDT", "exit", "", exitReason, 0),
+                tick.Price, "", 0, 0, tickIdx);
+            continue;
+        }
+    }
+
+    // Entry checks
     var sweep = PipelineFunctions.DetectSweepStart(w);
     if (!sweep.HasValue) continue;
 
-    var full = window.ToArray();
     var score = PipelineFunctions.ScoreEvent(sweep.Value, full);
     var state = PipelineFunctions.WriteState(score, full);
     var decision = PolicyEngine.Decide(state);
@@ -25,6 +53,7 @@ foreach (var tick in ticks)
         score.PatternFamily, score.PatternSimilarity, score.StateVelocity, tickIdx);
 }
 
+// Forced exit
 if (PolicyEngine.InPosition)
 {
     PolicyEngine.PaperExecute(

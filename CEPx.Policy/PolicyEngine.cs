@@ -10,11 +10,14 @@ public static class PolicyEngine
     // ── Paper trading ─────────────────────────────────────────────────
     private const double COMMISSION_PCT = 0.05;
     private const double SLIPPAGE_PCT = 0.01;
-    private const double POSITION_SIZE = 0.01;
+    private const int MAX_HOLD_TICKS = 20;
+    private const double STOP_LOSS_PCT = -0.5;
 
     public static bool InPosition;
     public static string PositionSide = "";
     public static double EntryPrice;
+    public static double RawEntryPrice;
+    public static int EntryTick;
     public static int TotalTrades;
     public static int WinningTrades;
     public static double TotalPnL;
@@ -38,9 +41,11 @@ public static class PolicyEngine
     {
         if (decision.Action == "enter" && !InPosition)
         {
+            RawEntryPrice = currentPrice;
             EntryPrice = currentPrice * (1.0 + SLIPPAGE_PCT / 100.0);
             InPosition = true;
             PositionSide = decision.Side;
+            EntryTick = tickIndex;
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex);
         }
