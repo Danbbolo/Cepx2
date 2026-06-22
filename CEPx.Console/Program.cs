@@ -4,7 +4,7 @@ using CEPx.Policy;
 
 Console.WriteLine("Fetching BTCUSDT 1m candles...");
 MarketEvent[] ticks;
-try { ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 100); }
+try { ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000); }
 catch (Exception ex) { Console.WriteLine($"API failed: {ex.Message}. Using synthetic."); ticks = PipelineFunctions.SyntheticTicks("BTCUSDT"); }
 Console.WriteLine($"Loaded {ticks.Length} ticks. Running paper trading...");
 

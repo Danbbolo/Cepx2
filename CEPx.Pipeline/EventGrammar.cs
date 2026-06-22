@@ -4,7 +4,7 @@ namespace CEPx.Pipeline;
 
 public static partial class PipelineFunctions
 {
-    private const double SWEEP_THRESHOLD_PCT = 0.5;
+    private const double SWEEP_THRESHOLD_PCT = 0.2;
     private const int SWEEP_WINDOW_TICKS = 5;
     private const double MIN_VOLUME_MULTIPLIER = 2.0;
 

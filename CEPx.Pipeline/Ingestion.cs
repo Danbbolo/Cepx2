@@ -201,8 +201,8 @@ public static partial class PipelineFunctions
         {
             var arr = row.EnumerateArray().ToArray();
             long ts = arr[0].GetInt64();
-            double close = double.Parse(arr[4].GetString()!);
-            double vol = double.Parse(arr[5].GetString()!);
+            double close = double.Parse(arr[4].GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+            double vol = double.Parse(arr[5].GetString()!, System.Globalization.CultureInfo.InvariantCulture);
             result.Add(new MarketEvent(ts, symbol, close, vol, 0, 0, seq++));
         }
         return result.ToArray();
