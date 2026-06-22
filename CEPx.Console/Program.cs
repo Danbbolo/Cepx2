@@ -48,7 +48,7 @@ static void RunLivePipeline(string symbol, int durationSeconds)
             Console.WriteLine($"CEPx: SweepStart detected @ {sweep.Value.Price:F0}");
             var score = PipelineFunctions.ScoreEvent(sweep.Value, arr);
             Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2}");
-            var state = WriteState(score, arr);
+            var state = PipelineFunctions.WriteState(score, arr);
             BlackboardWriter.Write(state);
             Console.WriteLine($"Blackboard: written {state.Symbol}");
             var decision = PolicyEngine.Decide(state);
@@ -79,7 +79,7 @@ static void RunReplayPipeline(MarketEvent[] ticks, bool writeToBlackboard = true
         Console.WriteLine($"CEPx: SweepStart detected @ {sweep.Value.Price:F0}");
         var score = PipelineFunctions.ScoreEvent(sweep.Value, arr);
         Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2}");
-        var state = WriteState(score, arr);
+        var state = PipelineFunctions.WriteState(score, arr);
 
         if (writeToBlackboard)
         {
@@ -93,45 +93,4 @@ static void RunReplayPipeline(MarketEvent[] ticks, bool writeToBlackboard = true
             Console.WriteLine($"Regime: {state.Regime} conf={state.RegimeConfidence:F2}");
         }
     }
-}
-
-static BlackboardState WriteState(StructuralScore score, MarketEvent[] window)
-{
-    int positiveDeltas = 0;
-    int totalDeltas = 0;
-    int evalCount = Math.Min(window.Length, 10);
-    int start = window.Length - evalCount;
-    for (int i = start + 1; i < window.Length; i++)
-    {
-        if (window[i].Price > window[i - 1].Price)
-            positiveDeltas++;
-        totalDeltas++;
-    }
-
-    string regime;
-    if (positiveDeltas >= 7)
-        regime = "uptrend";
-    else if (positiveDeltas <= 3)
-        regime = "downtrend";
-    else
-        regime = "chop";
-
-    double regimeConfidence = totalDeltas > 0
-        ? Math.Max(positiveDeltas, totalDeltas - positiveDeltas) / (double)totalDeltas
-        : 0.0;
-
-    return new BlackboardState(
-        score.Timestamp,
-        score.Symbol,
-        score.PatternFamily == "sweep",
-        score.PatternFamily,
-        score.PatternSimilarity,
-        score.StateVelocity,
-        score.UncertaintyUpper,
-        score.UncertaintyLower,
-        score.AnomalyScore,
-        regime,
-        regimeConfidence,
-        "hold"
-    );
 }

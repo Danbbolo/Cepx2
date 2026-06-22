@@ -40,11 +40,19 @@ public static partial class PipelineFunctions
 
             price = xPred + k0 * y;
             velocity = vPred + k1 * y;
-            p00 = (1.0 - k0) * pp00;
-            p01 = (1.0 - k0) * pp01;
-            p10 = pp10 - k1 * pp00;
-            p11 = pp11 - k1 * pp01;
+
+            double new_p00 = (1.0 - k0) * pp00;
+            double new_p01 = (1.0 - k0) * pp01;
+            double new_p10 = -k1 * pp00 + pp10;
+            double new_p11 = -k1 * pp01 + pp11;
+            p00 = new_p00;
+            p01 = new_p01;
+            p10 = new_p10;
+            p11 = new_p11;
             p01 = p10 = (p01 + p10) / 2.0;
+
+            if (p00 < 1e-9) p00 = 1e-9;
+            if (p11 < 1e-9) p11 = 1e-9;
         }
 
         double unc = Math.Sqrt(Math.Abs(p00));
@@ -66,6 +74,7 @@ public static partial class PipelineFunctions
         int n = prototype.Length;
         int m = candidate.Length;
         if (n == 0 || m == 0) return double.MaxValue;
+        if (n > 50 || m > 50) return double.MaxValue; // DTW hard cap: max 50 ticks per sequence
 
         double[] prev = new double[m];
         double[] curr = new double[m];
@@ -119,6 +128,7 @@ public static partial class PipelineFunctions
 
         if (window.Length >= 10)
         {
+            // DTW hard cap: candidate always 10 ticks, well within 50 limit
             double[] candidate = new double[10];
             int start = window.Length - 10;
             double cMin = double.MaxValue, cMax = double.MinValue;
@@ -159,5 +169,46 @@ public static partial class PipelineFunctions
         }
 
         return score;
+    }
+
+    public static BlackboardState WriteState(StructuralScore score, MarketEvent[] window)
+    {
+        int positiveDeltas = 0;
+        int totalDeltas = 0;
+        int evalCount = Math.Min(window.Length, 10);
+        int start = window.Length - evalCount;
+        for (int i = start + 1; i < window.Length; i++)
+        {
+            if (window[i].Price > window[i - 1].Price)
+                positiveDeltas++;
+            totalDeltas++;
+        }
+
+        string regime;
+        if (positiveDeltas >= 7)
+            regime = "uptrend";
+        else if (positiveDeltas <= 3)
+            regime = "downtrend";
+        else
+            regime = "chop";
+
+        double regimeConfidence = totalDeltas > 0
+            ? Math.Max(positiveDeltas, totalDeltas - positiveDeltas) / (double)totalDeltas
+            : 0.0;
+
+        return new BlackboardState(
+            score.Timestamp,
+            score.Symbol,
+            score.PatternFamily == "sweep",
+            score.PatternFamily,
+            score.PatternSimilarity,
+            score.StateVelocity,
+            score.UncertaintyUpper,
+            score.UncertaintyLower,
+            score.AnomalyScore,
+            regime,
+            regimeConfidence,
+            "hold"
+        );
     }
 }

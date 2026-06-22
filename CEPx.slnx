@@ -4,4 +4,5 @@
   <Project Path="CEPx.Core/CEPx.Core.csproj" />
   <Project Path="CEPx.Pipeline/CEPx.Pipeline.csproj" />
   <Project Path="CEPx.Policy/CEPx.Policy.csproj" />
+  <Project Path="CEPx.Tests/CEPx.Tests.csproj" />
 </Solution>

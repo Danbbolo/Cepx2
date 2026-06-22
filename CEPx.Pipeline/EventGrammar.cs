@@ -44,9 +44,4 @@ public static partial class PipelineFunctions
         }
         return events.ToArray();
     }
-
-    public static CepEvent[] ReplayTicks(MarketEvent[] ticks)
-    {
-        return new[] { new CepEvent(0L, "BTCUSDT", "SweepStart", 0.0, "") };
-    }
 }
