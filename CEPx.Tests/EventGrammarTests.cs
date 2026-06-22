@@ -10,8 +10,8 @@ public class EventGrammarTests
     public void SweepStart_fires_on_valid_synthetic_data()
     {
         var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
-        var first5 = ticks.Take(5).ToArray();
-        var result = PipelineFunctions.DetectSweepStart(first5);
+        var sweepWindow = ticks.Skip(11).Take(5).ToArray();
+        var result = PipelineFunctions.DetectSweepStart(sweepWindow);
         Assert.NotNull(result);
         Assert.Equal("SweepStart", result.Value.Type);
     }
