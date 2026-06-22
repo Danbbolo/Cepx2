@@ -34,6 +34,12 @@ public static class PolicyEngine
     public static int TotalTrades;
     public static int WinningTrades;
     public static double TotalPnL;
+    public static int ModeACount;
+    public static int ModeBCount;
+    public static int MomDecayExits;
+    public static int VelFlipExits;
+    public static int RevSigExits;
+    public static int OtherExits;
 
     // ── Structural exit state ─────────────────────────────────────────
     private static readonly List<double> _patternSimHistory = new();
@@ -59,6 +65,12 @@ public static class PolicyEngine
         _recentVelocities.Clear();
         _patternSimHistory.Clear();
         _entryReasons.Clear();
+        ModeACount = 0;
+        ModeBCount = 0;
+        MomDecayExits = 0;
+        VelFlipExits = 0;
+        RevSigExits = 0;
+        OtherExits = 0;
     }
 
     public static void RecordPatternSimilarity(double sim)
@@ -215,6 +227,8 @@ public static class PolicyEngine
             _recentVelocities.Clear();
             _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
+            if (decision.Reason == "mode_a") ModeACount++;
+            else if (decision.Reason == "mode_b") ModeBCount++;
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);
         }
         else if (decision.Action == "exit" && InPosition)
@@ -227,6 +241,13 @@ public static class PolicyEngine
             if (pnl > 0) WinningTrades++;
             TotalPnL += pnl;
             Console.WriteLine($"PAPER EXIT @ {exitPrice:F2} PnL: {pnl:F2}% reason: {decision.Reason}");
+            switch (decision.Reason)
+            {
+                case "momentum_decay": MomDecayExits++; break;
+                case "velocity_flip": VelFlipExits++; break;
+                case "reversal_signal": RevSigExits++; break;
+                default: OtherExits++; break;
+            }
             LogExit(exitPrice, decision.Reason, tickIndex);
             InPosition = false;
             PositionSide = "";
