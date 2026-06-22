@@ -14,8 +14,9 @@ foreach (var tick in ticks)
     var sweep = PipelineFunctions.DetectSweepStart(w);
     if (!sweep.HasValue) continue;
 
-    var score = PipelineFunctions.ScoreEvent(sweep.Value, w);
-    var state = PipelineFunctions.WriteState(score, w);
+    var full = window.ToArray();
+    var score = PipelineFunctions.ScoreEvent(sweep.Value, full);
+    var state = PipelineFunctions.WriteState(score, full);
     var decision = PolicyEngine.Decide(state);
 
     PolicyEngine.PaperExecute(decision, tick.Price);
