@@ -8,24 +8,22 @@ public static partial class PipelineFunctions
     private const int SWEEP_WINDOW_TICKS = 5;
     private const double MIN_VOLUME_MULTIPLIER = 2.0;
 
-    /// Find price-volume sweep in window.
+    /// Pure detector: returns CepEvent for EVERY sweep meeting basic price threshold.
+    /// No volume filter, no direction filter — L4 (PolicyEngine) decides entry.
     public static CepEvent? DetectSweepStart(MarketEvent[] window)
     {
         if (window.Length < SWEEP_WINDOW_TICKS) return null;
         var recent = new ArraySegment<MarketEvent>(window, window.Length - SWEEP_WINDOW_TICKS, SWEEP_WINDOW_TICKS);
         var prices = new double[SWEEP_WINDOW_TICKS];
-        var volumes = new double[SWEEP_WINDOW_TICKS];
-        for (int i = 0; i < SWEEP_WINDOW_TICKS; i++) { prices[i] = recent[i].Price; volumes[i] = recent[i].Volume; }
+        for (int i = 0; i < SWEEP_WINDOW_TICKS; i++) { prices[i] = recent[i].Price; }
         var high = prices.Max();
         var low = prices.Min();
         var avgPrice = prices.Average();
         if (avgPrice <= 0) return null;
         if ((high - low) / avgPrice * 100 < SWEEP_THRESHOLD_PCT) return null;
-        var avgVol = volumes.Average();
-        if (avgVol <= 0) return null;
         var cur = recent[recent.Count - 1];
-        if (cur.Volume <= avgVol * MIN_VOLUME_MULTIPLIER) return null;
-        return new CepEvent(cur.Timestamp, cur.Symbol, "SweepStart", cur.Price, "");
+        string dir = prices[SWEEP_WINDOW_TICKS - 1] > prices[0] ? "bullish" : "bearish";
+        return new CepEvent(cur.Timestamp, cur.Symbol, "SweepStart", cur.Price, dir);
     }
 
     /// Full replay for testing validation.

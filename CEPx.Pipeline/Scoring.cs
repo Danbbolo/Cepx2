@@ -11,11 +11,17 @@ public static partial class PipelineFunctions
     private static readonly double[] SWEEP_PROTOTYPE =
         { 0.0, 0.05, 0.12, 0.21, 0.33, 0.48, 0.66, 0.87, 1.12, 1.40 };
 
+    private static readonly double[] CONTINUATION_PROTOTYPE =
+        { 0.0, 0.3, 0.8, 1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7 };
+
+    private static readonly double[] REVERSAL_PROTOTYPE =
+        { 0.0, 0.3, 0.8, 1.0, 0.5, 0.2, 0.1, 0.05, 0.0, 0.0 };
+
     public static StructuralScore ScoreWithKalman(CepEvent evt, MarketEvent[] window)
     {
         if (window.Length == 0)
             return new StructuralScore(evt.Timestamp, evt.Symbol,
-                0.0, 0.0, 0.0, 0.0, "sweep", 0.0, 0.0);
+                0.0, 0.0, 0.0, 0.0, "sweep", 0.0, 0.0, 0.0);
 
         double price = window[0].Price;
         double velocity = 0.0;
@@ -64,6 +70,7 @@ public static partial class PipelineFunctions
             price + 2.0 * unc,
             price - 2.0 * unc,
             "sweep",
+            0.0,
             0.0,
             0.0
         );
@@ -141,19 +148,28 @@ public static partial class PipelineFunctions
 
             double cRange = cMax - cMin;
             if (cRange == 0)
-                return new StructuralScore(score.Timestamp, score.Symbol, score.StateMean, score.StateVelocity, score.UncertaintyUpper, score.UncertaintyLower, score.PatternFamily, 0.0, score.AnomalyScore);
+                return new StructuralScore(score.Timestamp, score.Symbol, score.StateMean, score.StateVelocity, score.UncertaintyUpper, score.UncertaintyLower, score.PatternFamily, 0.0, 0.0, score.AnomalyScore);
             if (cRange > 0)
                 for (int i = 0; i < 10; i++)
                     candidate[i] = (candidate[i] - cMin) / cRange;
 
-            double[] proto = new double[10];
-            double pMin = SWEEP_PROTOTYPE[0], pMax = SWEEP_PROTOTYPE[9];
-            double pRange = pMax - pMin;
+            // Continuation DTW
+            double[] contProto = new double[10];
+            double contMin = CONTINUATION_PROTOTYPE.Min(), contMax = CONTINUATION_PROTOTYPE.Max();
+            double contRange = contMax - contMin;
             for (int i = 0; i < 10; i++)
-                proto[i] = pRange > 0 ? (SWEEP_PROTOTYPE[i] - pMin) / pRange : 0.0;
+                contProto[i] = contRange > 0 ? (CONTINUATION_PROTOTYPE[i] - contMin) / contRange : 0.0;
+            double contDtw = ComputeDtw(contProto, candidate, WARPING_WINDOW);
+            double continuationSim = 1.0 / (1.0 + contDtw);
 
-            double dtw = ComputeDtw(proto, candidate, WARPING_WINDOW);
-            double similarity = 1.0 / (1.0 + dtw);
+            // Reversal DTW
+            double[] revProto = new double[10];
+            double revMin = REVERSAL_PROTOTYPE.Min(), revMax = REVERSAL_PROTOTYPE.Max();
+            double revRange = revMax - revMin;
+            for (int i = 0; i < 10; i++)
+                revProto[i] = revRange > 0 ? (REVERSAL_PROTOTYPE[i] - revMin) / revRange : 0.0;
+            double revDtw = ComputeDtw(revProto, candidate, WARPING_WINDOW);
+            double reversalSim = 1.0 / (1.0 + revDtw);
 
             return new StructuralScore(
                 score.Timestamp,
@@ -163,7 +179,8 @@ public static partial class PipelineFunctions
                 score.UncertaintyUpper,
                 score.UncertaintyLower,
                 score.PatternFamily,
-                similarity,
+                continuationSim,
+                reversalSim,
                 score.AnomalyScore
             );
         }
@@ -202,6 +219,7 @@ public static partial class PipelineFunctions
             score.PatternFamily == "sweep",
             score.PatternFamily,
             score.PatternSimilarity,
+            score.ReversalSimilarity,
             score.StateVelocity,
             score.UncertaintyUpper,
             score.UncertaintyLower,

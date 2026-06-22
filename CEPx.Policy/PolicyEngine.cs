@@ -29,6 +29,7 @@ public static class PolicyEngine
         if (state.SweepActive
             && state.PatternFamily == "sweep"
             && state.PatternSimilarity >= SIMILARITY_THRESHOLD
+            && state.ReversalScore < 0.5
             && state.AnomalyScore < ANOMALY_THRESHOLD)
             return new PolicyDecision(state.Timestamp, state.Symbol, "enter", "long", "sweep_confirmed", 1.0);
 

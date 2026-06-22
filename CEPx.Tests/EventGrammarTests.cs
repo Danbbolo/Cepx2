@@ -38,8 +38,9 @@ public class EventGrammarTests
     }
 
     [Fact]
-    public void SweepStart_does_not_fire_on_high_move_low_volume()
+    public void SweepStart_fires_on_high_move_even_with_low_volume()
     {
+        // Volume filter removed — detector is pure. BT filters later.
         var ticks = new MarketEvent[]
         {
             new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
@@ -49,7 +50,8 @@ public class EventGrammarTests
             new(400, "BTCUSDT", 42420.0, 1.0, 0, 0, 0),
         };
         var result = PipelineFunctions.DetectSweepStart(ticks);
-        Assert.Null(result);
+        Assert.NotNull(result);
+        Assert.Equal("SweepStart", result.Value.Type);
     }
 
     [Fact]
