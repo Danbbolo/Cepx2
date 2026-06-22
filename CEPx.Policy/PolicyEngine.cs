@@ -14,6 +14,7 @@ public static class PolicyEngine
     private const int MAX_HOLD_TICKS = 40;
     private const double STOP_LOSS_PCT = -1.0;
     private const double MOMENTUM_DECAY_SIM = 0.20;
+    private const double MOMENTUM_DECAY_SIM_ABSOLUTE = 0.15;
     private const int DECLINE_TICKS = 3;
     private const double FLAT_VELOCITY = 0.1;
     private const double TRAPPED_REV_THRESHOLD = 0.3;
@@ -104,10 +105,11 @@ public static class PolicyEngine
         {
             _ticksSinceEntry++;
 
-            // 1. Momentum Decay (HIGHEST) — requires BOTH sim<0.20 AND declining for 3 ticks
+            // 1. Momentum Decay (HIGHEST) — (sim<0.20 AND declining) OR (sim<0.15), 3-tick confirm
             bool simBelowThreshold = state.PatternSimilarity < MOMENTUM_DECAY_SIM;
+            bool simBelowAbsolute = state.PatternSimilarity < MOMENTUM_DECAY_SIM_ABSOLUTE;
             bool simDeclining = IsPatternSimilarityDeclining();
-            if (simBelowThreshold && simDeclining)
+            if ((simBelowThreshold && simDeclining) || simBelowAbsolute)
                 _momentumDecayCount++;
             else
                 _momentumDecayCount = 0;
@@ -183,7 +185,8 @@ public static class PolicyEngine
                 || (isBull && vel < 0)
                 || (!isBull && vel > 0);
             bool sweepRecent = (currentTickIndex - _lastSweepTick) <= MODE_B_MAX_SWEEP_AGE;
-            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent)
+            bool revStrongerThanCont = rev > state.PatternSimilarity;
+            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont)
             {
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);
