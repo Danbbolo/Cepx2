@@ -34,7 +34,7 @@ public static class PipelineFunctions
 
     public static PolicyDecision Decide(BlackboardState state)
     {
-        return new PolicyDecision(0L, "BTCUSDT", "noop", "", "", 0.0);
+        return Policy.PolicyEngine.Decide(state);
     }
 
     public static CepEvent[] ReplayTicks(MarketEvent[] ticks)

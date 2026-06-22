@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CEPx.Core\CEPx.Core.csproj" />
+    <ProjectReference Include="..\CEPx.Policy\CEPx.Policy.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

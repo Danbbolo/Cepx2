@@ -1,5 +1,5 @@
 using CEPx.Core;
-using CEPx.Blackboard;
+using CEPx.Policy;
 
 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 var state = new BlackboardState(
@@ -7,7 +7,5 @@ var state = new BlackboardState(
     61.57, 42566.12, 42563.64, 0.0,
     "volatile", 0.85, "hold"
 );
-BlackboardWriter.Connect();
-BlackboardWriter.Write(state);
-var read = BlackboardWriter.Read("BTCUSDT");
-Console.WriteLine($"Read back: {read?.PatternFamily} sim={read?.PatternSimilarity:F4}");
+var decision = PolicyEngine.Decide(state);
+Console.WriteLine($"Action: {decision.Action} Side: {decision.Side} Reason: {decision.Reason}");
