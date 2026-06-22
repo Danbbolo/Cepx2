@@ -19,7 +19,7 @@ public static class BlackboardWriter
 
     public static void Write(BlackboardState state)
     {
-        if (_db == null) { Connect(); _db = _redis!.GetDatabase(); }
+        if (_db == null) throw new InvalidOperationException("Not connected. Call Connect() first.");
         var key = $"cepx:blackboard:{state.Symbol}";
         var entries = new HashEntry[]
         {
