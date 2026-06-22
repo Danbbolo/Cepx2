@@ -5,81 +5,61 @@ Console.WriteLine("Fetching 1000 BTCUSDT 1m candles...");
 MarketEvent[] ticks;
 try { ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000); }
 catch (Exception ex) { Console.WriteLine($"API failed: {ex.Message}"); return; }
-Console.WriteLine($"Loaded {ticks.Length} ticks.");
 
-double[] thresholds = { 0.2, 0.3, 0.4, 0.5 };
-var results = new (double thr, int trades, int wins, double pnl, int stops, int timeouts, int sweeps)[thresholds.Length];
+double THR = 0.4;
 
-for (int ti = 0; ti < thresholds.Length; ti++)
+foreach (bool useTP in new[] { false, true })
 {
-    double thr = thresholds[ti];
     var window = new List<MarketEvent>();
-    int trades = 0, wins = 0, stops = 0, timeouts = 0, sweeps = 0;
+    int trades = 0, wins = 0, stops = 0, timeouts = 0, tpExits = 0;
     double totalPnl = 0;
-    bool inPos = false; double entry = 0, rawEntry = 0; int entryTick = 0;
+    bool ip = false; double entry = 0, rawEntry = 0; int et = 0;
+    string mode = useTP ? "WITH TP" : "NO TP";
 
-    for (int tickIdx = 0; tickIdx < ticks.Length; tickIdx++)
+    for (int i = 0; i < ticks.Length; i++)
     {
-        var tick = ticks[tickIdx];
+        var tick = ticks[i];
         window.Add(tick);
         if (window.Count < 5) continue;
+        var fw = window.TakeLast(5).ToArray();
+        var ff = window.ToArray();
 
-        var w = window.TakeLast(5).ToArray();
-        var full = window.ToArray();
-
-        if (inPos)
+        if (ip)
         {
-            bool exit = false;
-            if (tickIdx - entryTick > 20) { exit = true; timeouts++; }
-            else
-            {
-                double pnl = (tick.Price - rawEntry) / rawEntry * 100;
-                if (pnl < -0.5) { exit = true; stops++; }
-            }
-            if (exit)
+            double unrealPnl = (tick.Price - rawEntry) / rawEntry * 100;
+            bool ex = false; string why = "";
+
+            if (useTP && unrealPnl > 0.3) { ex = true; why = "tp"; tpExits++; }
+            else if (i - et > 20) { ex = true; why = "timeout"; timeouts++; }
+            else if (unrealPnl < -0.5) { ex = true; why = "stoploss"; stops++; }
+
+            if (ex)
             {
                 double exitPx = tick.Price * 0.9999;
                 double pnl = (exitPx - entry) / entry * 100 - 0.1;
-                totalPnl += pnl;
-                trades++;
-                if (pnl > 0) wins++;
-                inPos = false;
-                continue;
+                totalPnl += pnl; trades++; if (pnl > 0) wins++;
+                ip = false; continue;
             }
         }
 
-        var sweep = PipelineFunctions.DetectSweepStart(w);
-        if (!sweep.HasValue) continue;
-        sweeps++;
+        var sw = PipelineFunctions.DetectSweepStart(fw);
+        if (!sw.HasValue || ip) continue;
+        var sc = PipelineFunctions.ScoreEvent(sw.Value, ff);
+        if (sc.PatternSimilarity < THR) continue;
 
-        if (inPos) continue;
-
-        var score = PipelineFunctions.ScoreEvent(sweep.Value, full);
-        if (score.PatternSimilarity < thr) continue;
-
-        rawEntry = tick.Price;
-        entry = tick.Price * 1.0001;
-        inPos = true;
-        entryTick = tickIdx;
+        rawEntry = tick.Price; entry = tick.Price * 1.0001; ip = true; et = i;
     }
-    results[ti] = (thr, trades, wins, totalPnl, stops, timeouts, sweeps);
+
+    double wr = trades > 0 ? (double)wins / trades * 100 : 0;
+    double avg = trades > 0 ? totalPnl / trades : 0;
+    Console.WriteLine($"\n{mode}: thr={THR:F1}% trades={trades} win={wr:F0}% pnl={avg:F2}% tp={tpExits} timeout={timeouts} stop={stops}");
 }
 
-Console.WriteLine();
-Console.WriteLine("=== THRESHOLD COMPARISON ===");
-Console.WriteLine($"{"Thr",6} {"Trades",7} {"Win%",7} {"PnL%",7} {"Stops",7} {"TimeOuts",9} {"Sweeps",7}");
-foreach (var r in results)
-{
-    double wr = r.trades > 0 ? (double)r.wins / r.trades * 100 : 0;
-    Console.WriteLine($"{r.thr,6:F1}% {r.trades,7} {wr,6:F0}% {r.pnl,6:F2}% {r.stops,7} {r.timeouts,9} {r.sweeps,7}");
-}
-
-// Per-trade detail for first 3 trades at 0.2%
-Console.WriteLine();
-Console.WriteLine("=== TRADE DETAIL (threshold 0.2%) ===");
+// Detail on WITH TP
+Console.WriteLine($"\n=== WITH TP TRADE DETAIL ===");
 var dw = new List<MarketEvent>();
-int tradeNum = 0; bool ip = false; double e = 0, re = 0; int et = 0;
-for (int i = 0; i < ticks.Length && tradeNum < 5; i++)
+int tn = 0; bool ipp = false; double ee = 0, re = 0; int eet = 0;
+for (int i = 0; i < ticks.Length && tn < 8; i++)
 {
     var tick = ticks[i];
     dw.Add(tick);
@@ -87,27 +67,25 @@ for (int i = 0; i < ticks.Length && tradeNum < 5; i++)
     var fw = dw.TakeLast(5).ToArray();
     var ff = dw.ToArray();
 
-    if (ip)
+    if (ipp)
     {
+        double u = (tick.Price - re) / re * 100;
         bool ex = false; string why = "";
-        if (i - et > 20) { ex = true; why = "timeout"; }
-        else { double p = (tick.Price - re) / re * 100; if (p < -0.5) { ex = true; why = "stoploss"; } }
+        if (u > 0.3) { ex = true; why = "tp"; }
+        else if (i - eet > 20) { ex = true; why = "timeout"; }
+        else if (u < -0.5) { ex = true; why = "stoploss"; }
         if (ex)
         {
-            tradeNum++;
-            double ep = tick.Price * 0.9999;
-            double pp = (ep - e) / e * 100 - 0.1;
-            Console.WriteLine($"Trade {tradeNum}: enter={re:F2} exit={tick.Price:F2} pnl={pp:F2}% reason={why} hold={i-et}ticks");
-            Console.WriteLine($"  Entry candle: {ticks[i-(i-et)].Price:F2} vol={ticks[i-(i-et)].Volume:F3}");
-            if (i+1 < ticks.Length) Console.WriteLine($"  +1 candle: {ticks[i+1].Price:F2}");
-            ip = false; continue;
+            tn++; double ep = tick.Price * 0.9999;
+            double pp = (ep - ee) / ee * 100 - 0.1;
+            Console.WriteLine($"Trade {tn}: entry={re:F2} exit={tick.Price:F2} pnl={pp:F2}% {why} hold={i-eet}t");
+            ipp = false; continue;
         }
     }
 
     var sw = PipelineFunctions.DetectSweepStart(fw);
-    if (!sw.HasValue) continue;
-    if (ip) continue;
+    if (!sw.HasValue || ipp) continue;
     var sc = PipelineFunctions.ScoreEvent(sw.Value, ff);
-    if (sc.PatternSimilarity < 0.2) continue;
-    re = tick.Price; e = tick.Price * 1.0001; ip = true; et = i;
+    if (sc.PatternSimilarity < THR) continue;
+    re = tick.Price; ee = tick.Price * 1.0001; ipp = true; eet = i;
 }
