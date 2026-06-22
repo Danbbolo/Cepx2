@@ -9,6 +9,11 @@ var ticks = new MarketEvent[]
     new(now+200, "BTCUSDT", 42080.0, 1.5, 0, 0, 0),
     new(now+300, "BTCUSDT", 42150.0, 2.1, 0, 0, 0),
     new(now+400, "BTCUSDT", 42300.0, 5.0, 0, 0, 0),
+    new(now+500, "BTCUSDT", 42350.0, 3.0, 0, 0, 0),
+    new(now+600, "BTCUSDT", 42400.0, 2.5, 0, 0, 0),
+    new(now+700, "BTCUSDT", 42450.0, 2.0, 0, 0, 0),
+    new(now+800, "BTCUSDT", 42500.0, 1.8, 0, 0, 0),
+    new(now+900, "BTCUSDT", 42550.0, 1.5, 0, 0, 0),
 };
 var sweep = PipelineFunctions.DetectSweepStart(ticks);
 if (sweep.HasValue)
