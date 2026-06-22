@@ -21,7 +21,8 @@ public static class PolicyEngine
     private const int TRAPPED_MAX_TICKS = 5;
     private const int MOMENTUM_DECAY_CONFIRM = 3;
     private const int VELOCITY_FLIP_CONFIRM = 2;
-    private const double MODE_B_REVERSAL_THRESHOLD = 0.3;
+    private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
+    private const int VELOCITY_HISTORY_TICKS = 5;
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -39,6 +40,7 @@ public static class PolicyEngine
     private static int _ticksSinceEntry;
     private static int _momentumDecayCount;
     private static int _velocityFlipCount;
+    private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
     {
@@ -51,6 +53,7 @@ public static class PolicyEngine
         _ticksSinceEntry = 0;
         _momentumDecayCount = 0;
         _velocityFlipCount = 0;
+        _recentVelocities.Clear();
         _patternSimHistory.Clear();
         _entryReasons.Clear();
     }
@@ -59,6 +62,22 @@ public static class PolicyEngine
     {
         _patternSimHistory.Add(sim);
         if (_patternSimHistory.Count > 50) _patternSimHistory.RemoveAt(0);
+    }
+
+    public static void RecordVelocity(double vel)
+    {
+        _recentVelocities.Add(vel);
+        if (_recentVelocities.Count > VELOCITY_HISTORY_TICKS) _recentVelocities.RemoveAt(0);
+    }
+
+    private static bool HasVelocityDirectionChanged()
+    {
+        int n = _recentVelocities.Count;
+        if (n < 3) return false;
+        // Check if most recent velocities went from positive to negative or vice versa
+        int recent = _recentVelocities[n - 1] > 0 ? 1 : -1;
+        int older = _recentVelocities[n - 3] > 0 ? 1 : -1;
+        return recent != older;
     }
 
     private static bool IsPatternSimilarityDeclining()
@@ -75,6 +94,9 @@ public static class PolicyEngine
 
     public static PolicyDecision Decide(BlackboardState state, int currentTickIndex = 0, double currentPrice = 0, double sweepOriginPrice = 0, bool isBullishSweep = false)
     {
+        // Record velocity every tick for direction-change detection
+        RecordVelocity(state.KalmanVelocity);
+
         if (InPosition)
         {
             _ticksSinceEntry++;
@@ -150,12 +172,15 @@ public static class PolicyEngine
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a_continuation", 1.0);
             }
 
-            // MODE B: Reversal (trend exhausted, trap detected)
+            // MODE B: Reversal (sweep exhausted, trap detected)
             bool revRegimeOk = regime == "chop"
                 || (isBull && regime == "downtrend")
                 || (!isBull && regime == "uptrend");
-            bool velDying = Math.Abs(vel) < FLAT_VELOCITY || (isBull && vel < 0) || (!isBull && vel > 0);
-            if (rev >= MODE_B_REVERSAL_THRESHOLD && velDying && revRegimeOk)
+            bool velExhausted = HasVelocityDirectionChanged()
+                || Math.Abs(vel) < FLAT_VELOCITY
+                || (isBull && vel < 0)
+                || (!isBull && vel > 0);
+            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk)
             {
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b_reversal", 1.0);
@@ -181,6 +206,7 @@ public static class PolicyEngine
             _ticksSinceEntry = 0;
             _momentumDecayCount = 0;
             _velocityFlipCount = 0;
+            _recentVelocities.Clear();
             _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);
