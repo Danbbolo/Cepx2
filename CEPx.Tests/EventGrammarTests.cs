@@ -9,9 +9,15 @@ public class EventGrammarTests
     [Fact]
     public void SweepStart_fires_on_valid_synthetic_data()
     {
-        var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
-        var sweepWindow = ticks.Skip(11).Take(5).ToArray();
-        var result = PipelineFunctions.DetectSweepStart(sweepWindow);
+        var ticks = new MarketEvent[]
+        {
+            new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42030.0, 1.2, 0, 0, 0),
+            new(200, "BTCUSDT", 42080.0, 1.5, 0, 0, 0),
+            new(300, "BTCUSDT", 42150.0, 2.1, 0, 0, 0),
+            new(400, "BTCUSDT", 42300.0, 5.0, 0, 0, 0),
+        };
+        var result = PipelineFunctions.DetectSweepStart(ticks);
         Assert.NotNull(result);
         Assert.Equal("SweepStart", result.Value.Type);
     }

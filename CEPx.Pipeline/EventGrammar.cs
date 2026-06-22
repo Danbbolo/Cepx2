@@ -23,7 +23,7 @@ public static partial class PipelineFunctions
         if ((high - low) / avgPrice * 100 < SWEEP_THRESHOLD_PCT) return null;
         var avgVol = volumes.Average();
         if (avgVol <= 0) return null;
-        var cur = recent[^1];
+        var cur = recent[recent.Count - 1];
         if (cur.Volume <= avgVol * MIN_VOLUME_MULTIPLIER) return null;
         return new CepEvent(cur.Timestamp, cur.Symbol, "SweepStart", cur.Price, "");
     }
