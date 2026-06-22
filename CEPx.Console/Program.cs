@@ -1,96 +1,31 @@
-using CEPx.Core;
-using CEPx.Blackboard;
+﻿using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 
-const int WINDOW_SIZE = 50;
-const int DURATION = 60;
-
-// ── Test mode: replay ────────────────────────────────────────────
 var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
-RunReplayPipeline(ticks, writeToBlackboard: false);
 
-// ── Phase 5: Live pipeline ───────────────────────────────────────
-
-static void RunLivePipeline(string symbol, int durationSeconds)
+var window = new List<MarketEvent>();
+foreach (var tick in ticks)
 {
-    PipelineFunctions.LiveMode = true;
-    BlackboardWriter.Connect();
+    window.Add(tick);
+    if (window.Count < 5) continue;
 
-    var window = new MarketEvent[WINDOW_SIZE];
-    int count = 0;
-    var lk = new object();
+    var w = window.TakeLast(5).ToArray();
+    var sweep = PipelineFunctions.DetectSweepStart(w);
+    if (!sweep.HasValue) continue;
 
-    var feed = PipelineFunctions.ConnectBinanceFeed(symbol, tick =>
-    {
-        lock (lk)
-        {
-            window[count % WINDOW_SIZE] = tick;
-            count++;
-            int n = Math.Min(count, WINDOW_SIZE);
-            if (n < 5) return;
+    var score = PipelineFunctions.ScoreEvent(sweep.Value, w);
+    var state = PipelineFunctions.WriteState(score, w);
+    var decision = PolicyEngine.Decide(state);
 
-            var arr = new MarketEvent[n];
-            if (count <= WINDOW_SIZE)
-            {
-                Array.Copy(window, 0, arr, 0, n);
-            }
-            else
-            {
-                int start = count % WINDOW_SIZE;
-                int first = WINDOW_SIZE - start;
-                Array.Copy(window, start, arr, 0, first);
-                Array.Copy(window, 0, arr, first, start);
-            }
-
-            var sweep = PipelineFunctions.DetectSweepStart(arr);
-            if (!sweep.HasValue) return;
-            Console.WriteLine($"CEPx: SweepStart detected @ {sweep.Value.Price:F0}");
-            var score = PipelineFunctions.ScoreEvent(sweep.Value, arr);
-            Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2}");
-            var state = PipelineFunctions.WriteState(score, arr);
-            BlackboardWriter.Write(state);
-            Console.WriteLine($"Blackboard: written {state.Symbol}");
-            var decision = PolicyEngine.Decide(state);
-            Console.WriteLine($"Policy: {decision.Action} {decision.Side} {decision.Reason}");
-        }
-    });
-
-    Thread.Sleep(durationSeconds * 1000);
-    feed.Dispose();
+    PolicyEngine.PaperExecute(decision, tick.Price);
 }
 
-static void RunReplayPipeline(MarketEvent[] ticks, bool writeToBlackboard = true)
+if (PolicyEngine.InPosition)
 {
-    if (writeToBlackboard)
-        BlackboardWriter.Connect();
-
-    var window = new List<MarketEvent>(WINDOW_SIZE);
-
-    foreach (var tick in ticks)
-    {
-        window.Add(tick);
-        while (window.Count > WINDOW_SIZE) window.RemoveAt(0);
-        if (window.Count < 5) continue;
-
-        var arr = window.ToArray();
-        var sweep = PipelineFunctions.DetectSweepStart(arr);
-        if (!sweep.HasValue) continue;
-        Console.WriteLine($"CEPx: SweepStart detected @ {sweep.Value.Price:F0}");
-        var score = PipelineFunctions.ScoreEvent(sweep.Value, arr);
-        Console.WriteLine($"Kalman: mean={score.StateMean:F2} vel={score.StateVelocity:F2}");
-        var state = PipelineFunctions.WriteState(score, arr);
-
-        if (writeToBlackboard)
-        {
-            BlackboardWriter.Write(state);
-            Console.WriteLine($"Blackboard: written {state.Symbol}");
-            var decision = PolicyEngine.Decide(state);
-            Console.WriteLine($"Policy: {decision.Action} {decision.Side} {decision.Reason}");
-        }
-        else
-        {
-            Console.WriteLine($"Regime: {state.Regime} conf={state.RegimeConfidence:F2}");
-        }
-    }
+    PolicyEngine.PaperExecute(
+        new PolicyDecision(0, "BTCUSDT", "exit", "", "forced", 0),
+        ticks.Last().Price);
 }
+
+PolicyEngine.PrintPaperSummary();
