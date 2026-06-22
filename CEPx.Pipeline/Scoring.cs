@@ -7,16 +7,24 @@ public static partial class PipelineFunctions
     private const double PROCESS_NOISE = 0.01;
     private const double MEASUREMENT_NOISE = 1.0;
     private const int WARPING_WINDOW = 3;
+    private const double DTW_MULTIPLIER = 2.5; // scale DTW for multi-prototype best-of-N
 
     private static readonly double[] SWEEP_PROTOTYPE =
         { 0.0, 0.05, 0.12, 0.21, 0.33, 0.48, 0.66, 0.87, 1.12, 1.40 };
 
-    // Extracted from 30 days BTC/USDT 1m (June 1-30, 2026) — 1389 cont / 1306 rev samples
-    private static readonly double[] CONTINUATION_PROTOTYPE =
-        { 0.9889, 1.0000, 0.8516, 0.7564, 0.7260, 0.6322, 0.6253, 0.4504, 0.2142, 0.0000 };
+    // Extracted from 30 days BTC/USDT 1m (June 1-30, 2026) — k-means k=3
+    // 1454 continuation samples, 1269 reversal samples
+    private static readonly double[][] CONTINUATION_PROTOTYPES = new[] {
+        new[] { 0.2714, 0.2832, 0.3758, 0.5317, 0.6679, 0.7796, 0.7567, 0.6221, 0.4518, 0.3388 }, // C0: parabolic spike (n=287)
+        new[] { 0.8481, 0.8262, 0.7799, 0.7187, 0.6482, 0.5822, 0.4553, 0.3214, 0.2099, 0.1606 }, // C1: steady fade (n=667)
+        new[] { 0.2831, 0.2789, 0.2647, 0.2652, 0.2640, 0.2817, 0.4274, 0.5987, 0.7668, 0.8741 }, // C2: late ramp (n=500)
+    };
 
-    private static readonly double[] REVERSAL_PROTOTYPE =
-        { 1.0000, 0.8777, 0.8015, 0.5314, 0.2426, 0.1749, 0.0000, 0.1726, 0.3629, 0.4969 };
+    private static readonly double[][] REVERSAL_PROTOTYPES = new[] {
+        new[] { 0.3339, 0.4015, 0.4755, 0.5790, 0.7061, 0.8309, 0.7628, 0.6073, 0.4170, 0.2521 }, // R0: gradual reversal (n=211)
+        new[] { 0.2801, 0.2817, 0.2808, 0.2672, 0.2566, 0.2804, 0.4301, 0.6155, 0.7640, 0.8836 }, // R1: late reversal (n=537)
+        new[] { 0.8837, 0.8353, 0.7693, 0.7045, 0.6214, 0.5290, 0.4054, 0.3096, 0.2420, 0.1894 }, // R2: sharp reversal (n=521)
+    };
 
     public static StructuralScore ScoreWithKalman(CepEvent evt, MarketEvent[] window)
     {
@@ -154,23 +162,33 @@ public static partial class PipelineFunctions
                 for (int i = 0; i < 10; i++)
                     candidate[i] = (candidate[i] - cMin) / cRange;
 
-            // Continuation DTW
-            double[] contProto = new double[10];
-            double contMin = CONTINUATION_PROTOTYPE.Min(), contMax = CONTINUATION_PROTOTYPE.Max();
-            double contRange = contMax - contMin;
-            for (int i = 0; i < 10; i++)
-                contProto[i] = contRange > 0 ? (CONTINUATION_PROTOTYPE[i] - contMin) / contRange : 0.0;
-            double contDtw = ComputeDtw(contProto, candidate, WARPING_WINDOW);
-            double continuationSim = 1.0 / (1.0 + contDtw);
+            // Continuation DTW — best of N prototypes
+            double contBestDtw = double.MaxValue;
+            foreach (var proto in CONTINUATION_PROTOTYPES)
+            {
+                double[] contProto = new double[10];
+                double contMin = proto.Min(), contMax = proto.Max();
+                double contRange = contMax - contMin;
+                for (int i = 0; i < 10; i++)
+                    contProto[i] = contRange > 0 ? (proto[i] - contMin) / contRange : 0.0;
+                double d = ComputeDtw(contProto, candidate, WARPING_WINDOW);
+                if (d < contBestDtw) contBestDtw = d;
+            }
+            double continuationSim = 1.0 / (1.0 + contBestDtw * DTW_MULTIPLIER);
 
-            // Reversal DTW
-            double[] revProto = new double[10];
-            double revMin = REVERSAL_PROTOTYPE.Min(), revMax = REVERSAL_PROTOTYPE.Max();
-            double revRange = revMax - revMin;
-            for (int i = 0; i < 10; i++)
-                revProto[i] = revRange > 0 ? (REVERSAL_PROTOTYPE[i] - revMin) / revRange : 0.0;
-            double revDtw = ComputeDtw(revProto, candidate, WARPING_WINDOW);
-            double reversalSim = 1.0 / (1.0 + revDtw);
+            // Reversal DTW — best of N prototypes
+            double revBestDtw = double.MaxValue;
+            foreach (var proto in REVERSAL_PROTOTYPES)
+            {
+                double[] revProto = new double[10];
+                double revMin = proto.Min(), revMax = proto.Max();
+                double revRange = revMax - revMin;
+                for (int i = 0; i < 10; i++)
+                    revProto[i] = revRange > 0 ? (proto[i] - revMin) / revRange : 0.0;
+                double d = ComputeDtw(revProto, candidate, WARPING_WINDOW);
+                if (d < revBestDtw) revBestDtw = d;
+            }
+            double reversalSim = 1.0 / (1.0 + revBestDtw * DTW_MULTIPLIER);
 
             return new StructuralScore(
                 score.Timestamp,
