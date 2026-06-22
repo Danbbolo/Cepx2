@@ -4,7 +4,7 @@ namespace CEPx.Policy;
 
 public static class PolicyEngine
 {
-    private const double SIMILARITY_THRESHOLD = 0.3; // TEMPORARY: for evidence gathering
+    private const double SIMILARITY_THRESHOLD = 0.65;
     private const double ANOMALY_THRESHOLD = 0.5;
 
     // ── Paper trading ─────────────────────────────────────────────────
