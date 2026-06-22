@@ -32,6 +32,6 @@ public static class BlackboardWriter
         if (_db == null) { Connect(); _db = _redis!.GetDatabase(); }
         var json = _db.HashGet($"cepx:blackboard:{symbol}", "state");
         if (json.IsNull) return null;
-        return JsonSerializer.Deserialize<BlackboardState>(json!);
+        return JsonSerializer.Deserialize<BlackboardState>(json!.ToString());
     }
 }

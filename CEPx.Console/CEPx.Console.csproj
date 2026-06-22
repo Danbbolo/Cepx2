@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CEPx.Pipeline\CEPx.Pipeline.csproj" />
+    <ProjectReference Include="..\CEPx.Blackboard\CEPx.Blackboard.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
