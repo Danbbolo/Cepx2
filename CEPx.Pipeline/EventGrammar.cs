@@ -81,4 +81,22 @@ public static partial class PipelineFunctions
             return new CepEvent(cur.Timestamp, cur.Symbol, "BreakoutAttempt", cur.Price, "bearish");
         return null;
     }
+
+    public static CepEvent? DetectExhaustionPulse(MarketEvent[] window)
+    {
+        if (window.Length < 6) return null;
+        int l = window.Length;
+        double p0 = window[l - 6].Price;
+        double p2 = window[l - 4].Price;
+        double p3 = window[l - 3].Price;
+        double p5 = window[l - 1].Price;
+        double firstMove = p2 - p0;
+        double secondMove = p5 - p3;
+        double firstMovePct = Math.Abs(firstMove) / p0 * 100;
+        if (firstMovePct < 0.3) return null;
+        if (firstMove * secondMove > 0) return null;
+        if (Math.Abs(secondMove) < Math.Abs(firstMove) * 0.5) return null;
+        var ctx = firstMove > 0 ? "bullish_exhaustion" : "bearish_exhaustion";
+        return new CepEvent(window[l - 1].Timestamp, window[l - 1].Symbol, "ExhaustionPulse", p5, ctx);
+    }
 }
