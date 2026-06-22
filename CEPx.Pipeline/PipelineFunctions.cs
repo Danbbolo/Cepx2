@@ -294,7 +294,7 @@ public static class PipelineFunctions
         catch { return null; }
     }
 
-    private static MarketEvent[] SyntheticTicks(string symbol)
+    public static MarketEvent[] SyntheticTicks(string symbol)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         return new[]
