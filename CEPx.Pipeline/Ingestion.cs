@@ -187,4 +187,24 @@ public static partial class PipelineFunctions
             new(now+9900,  symbol, 43600.0, 1.8, 0, 0, 0),
         };
     }
+
+    public static MarketEvent[] FetchBinanceHistorical(string symbol, string interval = "1m", int limit = 100)
+    {
+        using var http = new HttpClient();
+        var url = $"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}";
+        var json = http.GetStringAsync(url).Result;
+        using var doc = JsonDocument.Parse(json);
+        var rows = doc.RootElement.EnumerateArray();
+        var result = new List<MarketEvent>();
+        int seq = 0;
+        foreach (var row in rows)
+        {
+            var arr = row.EnumerateArray().ToArray();
+            long ts = arr[0].GetInt64();
+            double close = double.Parse(arr[4].GetString()!);
+            double vol = double.Parse(arr[5].GetString()!);
+            result.Add(new MarketEvent(ts, symbol, close, vol, 0, 0, seq++));
+        }
+        return result.ToArray();
+    }
 }
