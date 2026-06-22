@@ -31,9 +31,9 @@ public class PolicyTests
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // Need 3 consecutive ticks for hysteresis
+        // Need 4 consecutive ticks for momentum_decay hysteresis
         PolicyDecision result = default;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
             result = PolicyEngine.Decide(state, currentTickIndex: 5 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("momentum_decay", result.Reason);
@@ -52,9 +52,9 @@ public class PolicyTests
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // Need 3 consecutive ticks for hysteresis
+        // Need 4 consecutive ticks for hysteresis
         PolicyDecision result = default;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
             result = PolicyEngine.Decide(state, currentTickIndex: 5 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("momentum_decay", result.Reason);

@@ -20,7 +20,7 @@ public static class PolicyEngine
     private const double TRAPPED_REV_THRESHOLD = 0.3;
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
     private const int TRAPPED_MAX_TICKS = 5;
-    private const int MOMENTUM_DECAY_CONFIRM = 3;
+    private const int MOMENTUM_DECAY_CONFIRM = 4;
     private const int VELOCITY_FLIP_CONFIRM = 2;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
     private const int VELOCITY_HISTORY_TICKS = 5;
