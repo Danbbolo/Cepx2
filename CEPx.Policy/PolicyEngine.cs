@@ -21,9 +21,9 @@ public static class PolicyEngine
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
     private const int TRAPPED_MAX_TICKS = 5;
     private const int MOMENTUM_DECAY_CONFIRM = 4;
-    private const int VELOCITY_FLIP_CONFIRM = 5;
-    private const double VELOCITY_FLIP_MIN_MAGNITUDE = 0.5;
-    private const double VELOCITY_FLIP_SIM_GATE = 0.30;
+    private const int VELOCITY_FLIP_CONFIRM = 8;
+    private const double VELOCITY_FLIP_MIN_MAGNITUDE = 0.8;
+    private const double VELOCITY_FLIP_SIM_GATE = 0.25;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const int MODE_B_MAX_SWEEP_AGE = 8;

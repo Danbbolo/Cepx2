@@ -157,27 +157,27 @@ public class PolicyTests
     public void Exit_fires_on_velocity_flip()
     {
         ResetPosition();
-        var state = MakeState(kalmanVelocity: -1.0, patternSimilarity: 0.25);
+        var state = MakeState(kalmanVelocity: -1.0, patternSimilarity: 0.20);
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // Need 5 consecutive ticks for velocity_flip hysteresis
+        // Need 8 consecutive ticks for velocity_flip hysteresis
         PolicyDecision result = default;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 8; i++)
             result = PolicyEngine.Decide(state, currentTickIndex: 10 + i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("velocity_flip", result.Reason);
 
         // Short position + positive velocity = flip
         ResetPosition();
-        var state2 = MakeState(kalmanVelocity: 1.0, patternSimilarity: 0.25);
+        var state2 = MakeState(kalmanVelocity: 1.0, patternSimilarity: 0.20);
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "short";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
         PolicyDecision result2 = default;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 8; i++)
             result2 = PolicyEngine.Decide(state2, currentTickIndex: 10 + i, currentPrice: 41900);
         Assert.Equal("exit", result2.Action);
         Assert.Equal("velocity_flip", result2.Reason);
