@@ -314,6 +314,7 @@ public static class PolicyEngine
             peakRev, avgRev, revPersistRatio,
             conflictOverlap,
             revSigTotal, contSigTotal,
+            effectiveCont, effectiveRev,
             protoOutcome, protoReason);
         // END PROTODIAG
 

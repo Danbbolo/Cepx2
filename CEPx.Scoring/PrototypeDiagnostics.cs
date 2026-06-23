@@ -28,6 +28,7 @@ public class PrototypeDiagnostics
         double peakRev, double avgRev, double revPersistence,
         double conflictOverlap,
         int revSignalCount, int contSignalCount,
+        double effectiveCont, double effectiveRev,
         string finalOutcome, string noopReason)
     {
         var rec = new CandidateRecord
@@ -43,6 +44,8 @@ public class PrototypeDiagnostics
             ConflictOverlap = conflictOverlap,
             RevSignalCount = revSignalCount,
             ContSignalCount = contSignalCount,
+            EffectiveContScore = effectiveCont,
+            EffectiveRevScore = effectiveRev,
             FinalOutcome = finalOutcome,
             NoopReason = noopReason,
             PnL = 0,
@@ -207,14 +210,136 @@ public class PrototypeDiagnostics
 
         // ── 9. Separability verdict ──────────────────────────────
         Console.WriteLine();
-        Console.WriteLine("-- Separability Verdict --");
-        double sepScore = SeparabilityScore(winners, losers);
-        if (sepScore > 0.05)
-            Console.WriteLine($"  Cont/Rev can SEPARATE winners from losers (score={sepScore:F4} > 0.05)");
-        else if (sepScore > 0.01)
-            Console.WriteLine($"  Cont/Rev has WEAK separation (score={sepScore:F4}, near noise floor)");
+        Console.WriteLine("-- Raw Prototype Separability (Layer 1: DTW only) --");
+        double rawSep = SeparabilityScore(winners, losers,
+            c => c.PeakContScore, c => c.PeakRevScore);
+        PrintSepLine("Raw (peak)", rawSep);
+
+        Console.WriteLine();
+        Console.WriteLine("-- Aggregated Separability (Layer 2: avg + persistence) --");
+        double aggSep = SeparabilityScore(winners, losers,
+            c => c.AvgContScore, c => c.AvgRevScore);
+        PrintSepLine("Aggregated (avg)", aggSep);
+
+        Console.WriteLine();
+        Console.WriteLine("-- Effective Separability (Layer 3: coherence + bonus) --");
+        double effSep = SeparabilityScore(winners, losers,
+            c => c.EffectiveContScore, c => c.EffectiveRevScore);
+        PrintSepLine("Effective (final)", effSep);
+
+        // ── 10. Before/after: does aggregation help or hurt? ──────
+        Console.WriteLine();
+        Console.WriteLine("-- Aggregation Impact (Raw → Aggregated → Effective) --");
+        Console.WriteLine($"  Raw peak separability:      {rawSep:F4}");
+        Console.WriteLine($"  Aggregated separability:    {aggSep:F4}");
+        Console.WriteLine($"  Effective separability:     {effSep:F4}");
+        double aggregationDelta = aggSep - rawSep;
+        double fullDelta = effSep - rawSep;
+        string aggVerdict = aggregationDelta > 0.02 ? "IMPROVES" : aggregationDelta < -0.02 ? "DEGRADES" : "NEUTRAL";
+        string fullVerdict = fullDelta > 0.02 ? "IMPROVES" : fullDelta < -0.02 ? "DEGRADES" : "NEUTRAL";
+        Console.WriteLine($"  Aggregation delta:  {aggregationDelta:+.F4} → aggregation {aggVerdict} signal");
+        Console.WriteLine($"  Full pipeline delta: {fullDelta:+.F4} → full pipeline {fullVerdict} signal");
+
+        // Raw vs aggregated correlation: does aggregation preserve ranking?
+        var enteredArr = entered.ToArray();
+        if (enteredArr.Length >= 5)
+        {
+            double rankCorrCont = SpearmanRank(enteredArr.Select(c => c.PeakContScore).ToArray(),
+                                               enteredArr.Select(c => c.EffectiveContScore).ToArray());
+            double rankCorrRev = SpearmanRank(enteredArr.Select(c => c.PeakRevScore).ToArray(),
+                                              enteredArr.Select(c => c.EffectiveRevScore).ToArray());
+            Console.WriteLine($"  Rank correlation (raw→eff cont): {rankCorrCont:F4}");
+            Console.WriteLine($"  Rank correlation (raw→eff rev):  {rankCorrRev:F4}");
+            if (rankCorrCont < 0.7 || rankCorrRev < 0.7)
+                Console.WriteLine($"  WARNING: Aggregation is REORDERING candidates (rank corr < 0.7)");
+            else
+                Console.WriteLine($"  Aggregation preserves ranking order (rank corr >= 0.7)");
+        }
+
+        // ── 11. Layer-by-layer winner/loser score comparison ──────
+        if (winners.Count >= 2 && losers.Count >= 2)
+        {
+            Console.WriteLine();
+            Console.WriteLine("-- Layer-by-Layer Winner/Loser Score Comparison --");
+            Console.WriteLine($"  {"Metric",-20} {"Winners",8} {"Losers",8} {"Diff",8} {"Sep?",6}");
+            Console.WriteLine(new string('-', 55));
+
+            PrintLayerComparison("Raw Peak Cont", winners, losers, c => c.PeakContScore);
+            PrintLayerComparison("Raw Peak Rev", winners, losers, c => c.PeakRevScore);
+            PrintLayerComparison("Agg Avg Cont", winners, losers, c => c.AvgContScore);
+            PrintLayerComparison("Agg Avg Rev", winners, losers, c => c.AvgRevScore);
+            PrintLayerComparison("Eff Cont", winners, losers, c => c.EffectiveContScore);
+            PrintLayerComparison("Eff Rev", winners, losers, c => c.EffectiveRevScore);
+            PrintLayerComparison("Cont Persist", winners, losers, c => c.ContPersistence);
+            PrintLayerComparison("Rev Persist", winners, losers, c => c.RevPersistence);
+        }
+
+        // ── 12. FINAL VERDICT ─────────────────────────────────────
+        Console.WriteLine();
+        Console.WriteLine("============================================================");
+        Console.WriteLine("=== FINAL VERDICT ===");
+        Console.WriteLine("============================================================");
+
+        // Q1: Are prototypes the main bottleneck?
+        bool prototypesWeak = rawSep < 0.05;
+        bool prototypesModerate = rawSep >= 0.05 && rawSep < 0.15;
+        Console.WriteLine();
+        Console.WriteLine("Q1: Are prototypes the main bottleneck?");
+        if (prototypesWeak)
+            Console.WriteLine("  YES — Raw DTW scores have no winner/loser separability.");
+        else if (prototypesModerate)
+            Console.WriteLine("  PARTIALLY — Raw DTW has weak separability but below useful threshold.");
         else
-            Console.WriteLine($"  Cont/Rev CANNOT separate winners from losers (score={sepScore:F4} <= 0.01)");
+            Console.WriteLine("  NO — Raw prototypes have meaningful separability.");
+
+        // Q2: Is scoring aggregation the main bottleneck?
+        bool aggregationHelps = aggregationDelta > 0.02;
+        bool aggregationHurts = aggregationDelta < -0.02;
+        Console.WriteLine();
+        Console.WriteLine("Q2: Is scoring aggregation the main bottleneck?");
+        if (aggregationHelps)
+            Console.WriteLine($"  NO — Aggregation IMPROVES separability by {aggregationDelta:+.F4}.");
+        else if (aggregationHurts)
+            Console.WriteLine($"  YES — Aggregation DEGRADES separability by {aggregationDelta:+.F4}.");
+        else
+            Console.WriteLine($"  NO — Aggregation is NEUTRAL (delta={aggregationDelta:+.F4}). The bottleneck is upstream.");
+
+        // Q3: Are both weak?
+        bool bothWeak = prototypesWeak && !aggregationHelps;
+        Console.WriteLine();
+        Console.WriteLine("Q3: Are both weak?");
+        if (bothWeak)
+            Console.WriteLine("  YES — Both prototypes AND aggregation are weak. The scoring pipeline has no discriminative power at any layer.");
+        else if (prototypesWeak && aggregationHelps)
+            Console.WriteLine("  PARTIALLY — Prototypes are weak but aggregation helps. The raw signal is noisy but aggregation extracts some structure.");
+        else
+            Console.WriteLine("  NO — At least one layer has meaningful signal.");
+
+        // Q4: Does aggregation improve or destroy signal quality?
+        Console.WriteLine();
+        Console.WriteLine("Q4: Does aggregation improve or destroy signal quality?");
+        if (aggregationDelta > 0.01)
+            Console.WriteLine($"  IMPROVES (delta={aggregationDelta:+.F4}) — Coherence scoring adds value beyond raw peaks.");
+        else if (aggregationDelta < -0.01)
+            Console.WriteLine($"  DESTROYS (delta={aggregationDelta:+.F4}) — Aggregation is worse than using raw peaks alone.");
+        else
+            Console.WriteLine($"  NEUTRAL (delta={aggregationDelta:+.F4}) — Aggregation doesn't change signal quality meaningfully.");
+
+        // Summary line
+        Console.WriteLine();
+        Console.WriteLine("── BOTTOM LINE ──");
+        if (prototypesWeak && Math.Abs(aggregationDelta) < 0.02)
+        {
+            Console.WriteLine("  The prototype/scoring layer is the ROOT bottleneck. No amount of policy");
+            Console.WriteLine("  architecture (coherence scoring, candidate lifecycle, signal boosting)");
+            Console.WriteLine("  can compensate for DTW scores that don't discriminate good from bad.");
+        }
+        else if (aggregationHurts)
+            Console.WriteLine("  Aggregation is ACTIVELY HURTING. Simplify to raw peaks or redesign aggregation.");
+        else if (prototypesModerate && aggregationHelps)
+            Console.WriteLine("  Both layers contribute. Prototypes are marginal; aggregation extracts value.");
+        else
+            Console.WriteLine("  Prototypes AND aggregation are weak. Full scoring redesign needed.");
         Console.WriteLine("============================================================");
     }
 
@@ -311,23 +436,66 @@ public class PrototypeDiagnostics
     private static double SeparabilityScore(
         List<CandidateRecord> winners, List<CandidateRecord> losers)
     {
+        return SeparabilityScore(winners, losers,
+            c => c.PeakContScore, c => c.PeakRevScore);
+    }
+
+    /// <summary>Layer-specific separability using custom score selectors.</summary>
+    private static double SeparabilityScore(
+        List<CandidateRecord> winners, List<CandidateRecord> losers,
+        Func<CandidateRecord, double> contSel, Func<CandidateRecord, double> revSel)
+    {
         if (winners.Count == 0 || losers.Count == 0) return -1;
 
-        double wCont = winners.Average(c => c.PeakContScore);
-        double wRev = winners.Average(c => c.PeakRevScore);
-        double lCont = losers.Average(c => c.PeakContScore);
-        double lRev = losers.Average(c => c.PeakRevScore);
+        double wCont = winners.Average(contSel);
+        double wRev = winners.Average(revSel);
+        double lCont = losers.Average(contSel);
+        double lRev = losers.Average(revSel);
 
-        // Pooled std for normalization
-        var allCont = winners.Select(c => c.PeakContScore).Concat(losers.Select(c => c.PeakContScore)).ToArray();
-        var allRev = winners.Select(c => c.PeakRevScore).Concat(losers.Select(c => c.PeakRevScore)).ToArray();
+        var allCont = winners.Select(contSel).Concat(losers.Select(contSel)).ToArray();
+        var allRev = winners.Select(revSel).Concat(losers.Select(revSel)).ToArray();
         double poolContStd = StdDev(allCont, allCont.Average());
         double poolRevStd = StdDev(allRev, allRev.Average());
 
-        // Normalized Euclidean distance between centroids
         double dCont = poolContStd > 0 ? (wCont - lCont) / poolContStd : 0;
         double dRev = poolRevStd > 0 ? (wRev - lRev) / poolRevStd : 0;
         return Math.Sqrt(dCont * dCont + dRev * dRev);
+    }
+
+    private static void PrintSepLine(string label, double score)
+    {
+        string verdict = score > 0.05 ? "SEPARABLE" : score > 0.01 ? "WEAK" : "NOISE";
+        Console.WriteLine($"  {label,-25}: {score:F4} → {verdict}");
+    }
+
+    private static void PrintLayerComparison(string label,
+        List<CandidateRecord> winners, List<CandidateRecord> losers,
+        Func<CandidateRecord, double> selector)
+    {
+        double wMean = winners.Average(selector);
+        double lMean = losers.Average(selector);
+        double diff = wMean - lMean;
+        string sep = Math.Abs(diff) > 0.03 ? "YES" : "no";
+        Console.WriteLine($"  {label,-20} {wMean,8:F3} {lMean,8:F3} {diff,8:+.F3} {sep,6}");
+    }
+
+    /// <summary>Spearman rank correlation coefficient.</summary>
+    private static double SpearmanRank(double[] x, double[] y)
+    {
+        int n = Math.Min(x.Length, y.Length);
+        if (n < 3) return 0;
+        int[] rankX = Rank(x), rankY = Rank(y);
+        return ComputePearson(rankX.Select(r => (double)r).ToArray(),
+                              rankY.Select(r => (double)r).ToArray());
+    }
+
+    private static int[] Rank(double[] vals)
+    {
+        int n = vals.Length;
+        var indexed = vals.Select((v, i) => (v, i)).OrderBy(p => p.v).ToArray();
+        int[] ranks = new int[n];
+        for (int i = 0; i < n; i++) ranks[indexed[i].i] = i + 1;
+        return ranks;
     }
 
     // ── Record type ──────────────────────────────────────────────────
@@ -336,13 +504,19 @@ public class PrototypeDiagnostics
     {
         public int Id;
         public int CreatedTick;
+        // ── Layer 1: Raw prototype scores (DTW, pre-aggregation) ──
         public double PeakContScore;
+        public double PeakRevScore;
+        // ── Layer 2: Aggregated scores (coherence: avg + persistence + conflict) ──
         public double AvgContScore;
         public double ContPersistence;
-        public double PeakRevScore;
         public double AvgRevScore;
         public double RevPersistence;
         public double ConflictOverlap;
+        // ── Layer 3: Effective scores (after aggregation + signal bonus) ──
+        public double EffectiveContScore;
+        public double EffectiveRevScore;
+        // ── Metadata ──
         public int RevSignalCount;
         public int ContSignalCount;
         public string FinalOutcome;  // "mode_a", "mode_b", "noop"
