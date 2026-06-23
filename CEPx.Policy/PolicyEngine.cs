@@ -340,8 +340,10 @@ public static class PolicyEngine
         effectiveRev = Math.Max(0, Math.Min(1.0, effectiveRev));
 
         // ── Build BlackboardState with effective scores ──────────
+        // Non-sweep: force SweepActive=true since no event-driven structures fire
+        string patternFamily = isNonSweep ? "sweep" : "sweep";
         var state = new BlackboardState(
-            0, "BTCUSDT", true, "sweep",
+            0, "BTCUSDT", true, patternFamily,
             effectiveCont, effectiveRev, _candidateBestVel,
             0, 0, 0, _candidateBestRegime, 0.5, "hold");
 
@@ -773,18 +775,12 @@ public static class PolicyEngine
             double vel = state.KalmanVelocity;
             double rev = state.ReversalScore;
             string regime = state.Regime;
+            bool isNonSweep = _candidateTriggerSource != "sweep";
 
             // MODE A: Continuation (trend-aligned momentum)
-            // Multi-tier gradient boosting system — parallel to Mode B's 4-tier reversal logic.
-            // Each tier uses score-dependent velocity threshold relaxation.
-            //
-            // Tier 1: DUAL cont — MomentumPersistence + NoMeaningfulAbsorption both active
-            // Tier 2: Cont + trend — either cont signal + trend-aligned regime
-            // Tier 3: Cont + velocity — either cont signal + strong Kalman velocity
-            // Tier 4: Cont standalone — one cont signal, no favorable regime/velocity
-            // Tier 5: Classic — no cont signals, trend-aligned + velStrong (unchanged)
-
             bool trendAligned = (isBull && regime == "uptrend") || (!isBull && regime == "downtrend");
+            // Non-sweep: relax trend alignment — consider chop as acceptable
+            if (isNonSweep && regime == "chop") trendAligned = true;
 
             // ── Check active continuation signals ────────────────
             bool momPerActive = _lastMomPerType != "" &&
@@ -852,6 +848,8 @@ public static class PolicyEngine
             }
 
             bool velOk = (isBull && vel > effectiveVelThreshold) || (!isBull && vel < -effectiveVelThreshold);
+            // Non-sweep: relax velocity gate — structural triggers don't need momentum confirmation
+            if (isNonSweep && !velOk) velOk = (isBull && vel > -0.1) || (!isBull && vel < 0.1); // just not opposing
 
             if (entryAllowed && velOk && rev < 0.5)
             {
