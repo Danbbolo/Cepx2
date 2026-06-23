@@ -80,15 +80,106 @@ public static class StructureScorers
 
     /// <summary>
     /// Score breakout fail: price breaks a prior swing level but closes back inside.
-    /// No existing detector — new structure.
+    /// Classic trap pattern — breakout traders get caught, price reverses.
+    ///
+    /// Four dimensions:
+    ///   A. Penetration depth — how far did price break the level? (0.2% → 1.0)     [30%]
+    ///   B. Close-back speed — did it fail within 2 ticks? (1 tick → 1.0, 5+ → 0.1) [30%]
+    ///   C. Volume on breakout — high vol breakout that fails = stronger trap        [20%]
+    ///   D. Retracement ratio — what % of breakout was retraced? (100% → 1.0)        [20%]
+    ///
+    /// Lookback: uses priceWindow to find swing high/low, then checks if recent
+    /// ticks broke it and closed back inside.
     /// </summary>
     public static double ScoreBreakoutFail(
         MarketEvent[] priceWindow,
+        double sweepPrice,
         bool isBullishSweep,
         ScoringConfig cfg)
     {
-        // STUB — Phase 3
-        return 0.0;
+        int n = priceWindow.Length;
+        if (n < 8) return 0.0; // need enough history for swing + breakout + fail
+
+        int half = n / 2;
+
+        // ── Find swing level from first half of window ────────────
+        double swingHigh = double.MinValue, swingLow = double.MaxValue;
+        for (int i = 0; i < half; i++)
+        {
+            if (priceWindow[i].Price > swingHigh) swingHigh = priceWindow[i].Price;
+            if (priceWindow[i].Price < swingLow) swingLow = priceWindow[i].Price;
+        }
+        if (swingHigh <= 0 || swingLow <= 0) return 0.0;
+
+        // Swing range must be meaningful
+        double swingRangePct = (swingHigh - swingLow) / sweepPrice * 100;
+        if (swingRangePct < 0.05) return 0.0; // too narrow to be meaningful
+
+        // ── Check for breakout in second half ────────────────────
+        double breakoutLevel = isBullishSweep ? swingHigh : swingLow;
+        int breakoutTick = -1;
+        double maxPenetration = 0;
+        int maxPenetrationTick = -1;
+
+        for (int i = half; i < n; i++)
+        {
+            double pctBeyond = isBullishSweep
+                ? (priceWindow[i].Price - breakoutLevel) / breakoutLevel * 100
+                : (breakoutLevel - priceWindow[i].Price) / breakoutLevel * 100;
+
+            if (pctBeyond > 0 && pctBeyond > maxPenetration)
+            {
+                maxPenetration = pctBeyond;
+                maxPenetrationTick = i;
+                if (breakoutTick < 0) breakoutTick = i;
+            }
+        }
+
+        if (breakoutTick < 0) return 0.0; // no breakout — structure absent
+
+        // ── Check for close-back (fail) after breakout ────────────
+        bool closedBack = false;
+        int closeBackTick = -1;
+        for (int i = maxPenetrationTick + 1; i < n; i++)
+        {
+            bool inside = isBullishSweep
+                ? priceWindow[i].Price <= breakoutLevel
+                : priceWindow[i].Price >= breakoutLevel;
+
+            if (inside) { closedBack = true; closeBackTick = i; break; }
+        }
+
+        if (!closedBack) return 0.0; // breakout still running — structure absent
+
+        // ── A. Penetration depth ──────────────────────────────────
+        double depthScore = Normalize(maxPenetration, cfg.PenetrationDepthNormPct);
+
+        // ── B. Close-back speed ───────────────────────────────────
+        int ticksToFail = closeBackTick - maxPenetrationTick;
+        double speedScore = ticksToFail <= 1 ? 1.0
+                          : ticksToFail <= 2 ? 0.8
+                          : ticksToFail <= 3 ? 0.5
+                          : ticksToFail <= 5 ? 0.3
+                          : 0.1;
+
+        // ── C. Volume on breakout — high vol fail = stronger trap ──
+        double breakoutVol = priceWindow[maxPenetrationTick].Volume;
+        double avgVol = 0;
+        for (int i = 0; i < n; i++) avgVol += priceWindow[i].Volume;
+        avgVol /= n;
+        double volRatio = breakoutVol / Math.Max(avgVol, 1e-10);
+        double volumeScore = Normalize(volRatio, cfg.ResumeVolumeNorm);
+
+        // ── D. Retracement ratio — how much of the breakout reversed ──
+        double reversalDepth = isBullishSweep
+            ? maxPenetration > 0 ? (priceWindow[maxPenetrationTick].Price - priceWindow[closeBackTick].Price)
+                                   / (priceWindow[maxPenetrationTick].Price - breakoutLevel) : 0
+            : maxPenetration > 0 ? (priceWindow[closeBackTick].Price - priceWindow[maxPenetrationTick].Price)
+                                   / (breakoutLevel - priceWindow[maxPenetrationTick].Price) : 0;
+        double retraceScore = Clamp01(Math.Max(0, reversalDepth));
+
+        // ── Combined ──────────────────────────────────────────────
+        return Clamp01(depthScore * 0.30 + speedScore * 0.30 + volumeScore * 0.20 + retraceScore * 0.20);
     }
 
     /// <summary>
@@ -361,8 +452,17 @@ public static class StructureScorers
     }
 
     /// <summary>
-    /// Score continuation after pullback: price retraces 30-70% then resumes.
-    /// No existing detector — new structure.
+    /// Score continuation after pullback: price retraces 30-70% of sweep range
+    /// and then resumes in the sweep direction. The pullback-resume structure is a
+    /// classic continuation setup — stops are run, then trend resumes.
+    ///
+    /// Four dimensions:
+    ///   A. Retracement depth — how deep was the pullback? (30-50% healthy → 1.0, 70%+ → 0.2) [35%]
+    ///   B. Resume speed — how fast did price recover? (1-2 ticks → 1.0)                    [25%]
+    ///   C. New extreme — did price make a new extreme beyond sweep? (yes → 1.0)             [25%]
+    ///   D. Volume on resume — high vol recovery = commitment                                [15%]
+    ///
+    /// Structure absent if: no retracement into 30-70% zone, or price doesn't resume.
     /// </summary>
     public static double ScorePullbackResume(
         MarketEvent[] priceWindow,
@@ -370,8 +470,107 @@ public static class StructureScorers
         bool isBullishSweep,
         ScoringConfig cfg)
     {
-        // STUB — Phase 3
-        return 0.0;
+        int n = priceWindow.Length;
+        if (n < 6) return 0.0;
+
+        double firstPrice = priceWindow[0].Price;
+
+        // ── Find sweep extreme (farthest from origin in sweep direction) ──
+        double sweepExtreme = firstPrice;
+        int extremeIdx = 0;
+        for (int i = 1; i < n; i++)
+        {
+            bool beyond = isBullishSweep
+                ? priceWindow[i].Price > sweepExtreme
+                : priceWindow[i].Price < sweepExtreme;
+            if (beyond) { sweepExtreme = priceWindow[i].Price; extremeIdx = i; }
+        }
+
+        double sweepRangePct = Math.Abs(sweepExtreme - sweepOrigin) / sweepOrigin * 100;
+        if (sweepRangePct < 0.08) return 0.0; // sweep too small
+
+        // ── Find deepest retracement AFTER the extreme ────────────
+        double deepestRetrace = sweepExtreme;
+        int retraceIdx = extremeIdx;
+        for (int i = extremeIdx + 1; i < n; i++)
+        {
+            bool deeper = isBullishSweep
+                ? priceWindow[i].Price < deepestRetrace
+                : priceWindow[i].Price > deepestRetrace;
+            if (deeper) { deepestRetrace = priceWindow[i].Price; retraceIdx = i; }
+        }
+
+        double retraceDist = isBullishSweep
+            ? sweepExtreme - deepestRetrace
+            : deepestRetrace - sweepExtreme;
+        double retracePct = sweepExtreme > 0
+            ? retraceDist / sweepExtreme * 100 : 0;
+        double sweepDist = isBullishSweep
+            ? sweepExtreme - sweepOrigin
+            : sweepOrigin - sweepExtreme;
+        double retraceRatio = sweepDist > 0 ? retraceDist / sweepDist : 0;
+
+        // ── Gate: retracement must be 30-70% of sweep range ──────
+        if (retraceRatio < 0.30 || retraceRatio > 0.85) return 0.0;
+
+        // ── Check for resume: price moves back toward sweep extreme ──
+        double resumePrice = deepestRetrace;
+        int resumeIdx = retraceIdx;
+        for (int i = retraceIdx + 1; i < n; i++)
+        {
+            bool resuming = isBullishSweep
+                ? priceWindow[i].Price > resumePrice
+                : priceWindow[i].Price < resumePrice;
+            if (resuming) { resumePrice = priceWindow[i].Price; resumeIdx = i; }
+        }
+
+        if (resumeIdx <= retraceIdx) return 0.0; // no resume — structure absent
+
+        // ── A. Retracement depth quality (30-50% = healthiest) ────
+        // Peak score at 40% retracement (healthy pullback), decays to 70%
+        double healthyMax = cfg.RetracementHealthyMaxPct; // default 0.5
+        double retraceQuality = retraceRatio <= healthyMax
+            ? Clamp01(retraceRatio / healthyMax)
+            : Clamp01(1.0 - (retraceRatio - healthyMax) / (0.85 - healthyMax));
+        double retraceScore = retraceQuality * 0.7 + 0.3; // floor 0.3 if in zone
+
+        // ── B. Resume speed ───────────────────────────────────────
+        int resumeTicks = resumeIdx - retraceIdx;
+        double speedScore = resumeTicks <= 1 ? 1.0
+                          : resumeTicks <= 2 ? 0.8
+                          : resumeTicks <= 4 ? 0.5
+                          : resumeTicks <= 6 ? 0.3
+                          : 0.1;
+
+        // ── C. New extreme — did price break beyond sweep extreme? ──
+        double resumeMove = isBullishSweep
+            ? resumePrice - deepestRetrace
+            : deepestRetrace - resumePrice;
+        double resumeMovePct = deepestRetrace > 0
+            ? resumeMove / deepestRetrace * 100 : 0;
+        bool madeNewExtreme = isBullishSweep
+            ? resumePrice > sweepExtreme * 1.0005
+            : resumePrice < sweepExtreme * 0.9995;
+        double extremeScore = madeNewExtreme ? 1.0 : Clamp01(resumeMovePct / (sweepRangePct * 0.5));
+
+        // ── D. Volume on resume ───────────────────────────────────
+        double resumeVol = 0;
+        int volCount = 0;
+        for (int i = retraceIdx + 1; i <= resumeIdx; i++)
+        {
+            resumeVol += priceWindow[i].Volume;
+            volCount++;
+        }
+        double avgResumeVol = volCount > 0 ? resumeVol / volCount : 0;
+        double avgAllVol = 0;
+        for (int i = 0; i < n; i++) avgAllVol += priceWindow[i].Volume;
+        avgAllVol /= n;
+        double resumeVolRatio = avgAllVol > 0 ? avgResumeVol / avgAllVol : 1.0;
+        double volScore = Normalize(resumeVolRatio, cfg.ResumeVolumeNorm);
+
+        // ── Combined ──────────────────────────────────────────────
+        return Clamp01(retraceScore * 0.35 + speedScore * 0.25
+                     + extremeScore * 0.25 + volScore * 0.15);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -380,15 +579,112 @@ public static class StructureScorers
 
     /// <summary>
     /// Score low-liquidity rejection/acceptance: thin-volume sweep behavior.
-    /// Uses Volume + BidSize/AskSize when available.
+    /// When volume is unusually low, sweeps are more likely to be "fake" —
+    /// either rejected (long wick opposite direction) or accepted (clean follow-through).
+    ///
+    /// Three dimensions:
+    ///   A. Volume thinness — how far below daily avg? (<50% → 1.0, >80% → 0.0)     [35%]
+    ///   B. Wick-to-body ratio — long wick against sweep = rejection signal           [35%]
+    ///   C. Follow-through — next ticks continue or reverse? (continue → 1.0 cont)    [30%]
+    ///
+    /// The score can be interpreted as:
+    ///   - High score with wick → REJECTION (reversal signal)
+    ///   - High score with follow-through → ACCEPTANCE (continuation signal)
+    ///   - Low score → normal liquidity, this structure doesn't apply
+    ///
+    /// Uses BidSize/AskSize from MarketEvent as bonus when available (CHD data).
     /// </summary>
     public static double ScoreLowLiquidityReject(
         MarketEvent[] priceWindow,
+        double sweepOrigin,
+        bool isBullishSweep,
         double dailyAvgVolume,
         ScoringConfig cfg)
     {
-        // STUB — Phase 3
-        return 0.0;
+        int n = priceWindow.Length;
+        if (n < 4 || dailyAvgVolume <= 0) return 0.0;
+
+        // ── A. Volume thinness ────────────────────────────────────
+        double windowAvgVol = 0;
+        for (int i = 0; i < n; i++) windowAvgVol += priceWindow[i].Volume;
+        windowAvgVol /= n;
+
+        double thinRatio = windowAvgVol / dailyAvgVolume;
+        if (thinRatio > 0.9) return 0.0; // normal volume — structure absent
+
+        // thinRatio at ThinVolumeRatio (0.5) → score 0.5, at 0.2 → score 1.0
+        double thinnessScore = Clamp01(1.0 - (thinRatio / cfg.ThinVolumeRatio));
+
+        // ── B. Wick-to-body ratio (on the sweep candle) ────────────
+        // Sweep candle = first tick of window (when sweep was detected)
+        double sweepOpen = priceWindow[0].Price;
+        double sweepHigh = sweepOpen, sweepLow = sweepOpen;
+        double sweepVol = priceWindow[0].Volume;
+
+        // Find the sweep candle's high/low in the first few ticks
+        for (int i = 0; i < Math.Min(3, n); i++)
+        {
+            if (priceWindow[i].Price > sweepHigh) sweepHigh = priceWindow[i].Price;
+            if (priceWindow[i].Price < sweepLow) sweepLow = priceWindow[i].Price;
+        }
+
+        double body = Math.Abs(sweepOpen - priceWindow[Math.Min(2, n - 1)].Price);
+        double totalRange = sweepHigh - sweepLow;
+        double wickRatio = body > 1e-10 ? (totalRange - body) / body : totalRange > 1e-10 ? 3.0 : 0;
+
+        // Wick direction matters: wick against sweep = rejection
+        double upperWick = sweepHigh - Math.Max(sweepOpen, priceWindow[Math.Min(2, n - 1)].Price);
+        double lowerWick = Math.Min(sweepOpen, priceWindow[Math.Min(2, n - 1)].Price) - sweepLow;
+        bool wickAgainstSweep = isBullishSweep
+            ? upperWick > lowerWick * 1.5   // bullish sweep: upper wick = rejection
+            : lowerWick > upperWick * 1.5;   // bearish sweep: lower wick = rejection
+
+        double wickScore = Normalize(wickRatio, cfg.WickBodyRatioNorm);
+        if (!wickAgainstSweep) wickScore *= 0.3; // wrong-direction wick = weak signal
+
+        // ── C. Follow-through (rest of window after sweep) ────────
+        int followStart = Math.Min(3, n);
+        if (followStart >= n) return Clamp01(thinnessScore * 0.35 + wickScore * 0.35);
+
+        int continueTicks = 0, reverseTicks = 0, totalFollow = 0;
+        for (int i = followStart; i < n; i++)
+        {
+            totalFollow++;
+            double move = priceWindow[i].Price - priceWindow[i - 1].Price;
+            bool movingWithSweep = isBullishSweep ? move > 0 : move < 0;
+
+            if (movingWithSweep) continueTicks++;
+            else if (Math.Abs(move) > 1e-8) reverseTicks++;
+        }
+
+        double followRatio = totalFollow > 0 ? (double)continueTicks / totalFollow : 0.5;
+
+        // Follow-through score: binary interpretation
+        // > 60% continuation → acceptance signal (cont)
+        // < 40% continuation → rejection signal (rev)
+        // 40-60% → neutral
+        double followScore;
+        if (followRatio >= 0.6) followScore = Clamp01((followRatio - 0.5) / 0.5); // 0.5→0.0, 1.0→1.0
+        else if (followRatio <= 0.4) followScore = 0.0; // reversal follow-through
+        else followScore = 0.3; // neutral
+
+        // ── D. BidSize/AskSize bonus (CHD data only) ──────────────
+        double bookBonus = 0.0;
+        double totalBid = 0, totalAsk = 0;
+        for (int i = 0; i < n; i++) { totalBid += priceWindow[i].BidSize; totalAsk += priceWindow[i].AskSize; }
+        if (totalBid > 0 && totalAsk > 0)
+        {
+            double ratio = totalBid / totalAsk;
+            double imbalance = Math.Abs(ratio - 1.0);
+            bookBonus = Normalize(imbalance, cfg.BidAskRatioNorm) * 0.15;
+        }
+
+        // ── Combined ──────────────────────────────────────────────
+        // Note: the combined score reflects the confidence that this
+        // thin-volume sweep is MEANINGFUL (rejection or acceptance).
+        // The DIRECTION is encoded in wickScore and followScore.
+        return Clamp01(thinnessScore * 0.35 + wickScore * 0.35
+                     + followScore * 0.30 + bookBonus);
     }
 
     // ═══════════════════════════════════════════════════════════════
