@@ -731,21 +731,41 @@ public static class StructureScorers
     }
 
     /// <summary>
-    /// Score BOS (Break of Structure): continuation signal when BOS direction
-    /// matches sweep direction.
+    /// Score BOS (Break of Structure): price broke a prior swing level.
+    /// BOS is a continuation signal when aligned with sweep direction,
+    /// and a potential reversal signal when against sweep (structure changing).
+    ///
+    /// Uses BOS timestamp recency rather than transient flag — BOS clears
+    /// when new swings form, but the structural break remains informative.
     /// </summary>
     public static double ScoreBOS(
-        ActiveEventSnapshot events, ScoringConfig cfg)
+        ActiveEventSnapshot events, MarketEvent[] priceWindow, ScoringConfig cfg)
     {
-        bool bosAligned = (events.IsBullishSweep && events.BullishBOS)
-                       || (!events.IsBullishSweep && events.BearishBOS);
-        if (!bosAligned) return 0.0;
-        // Score based on how far beyond the swing level price went
+        // ── Check if BOS occurred recently (within ~20 ticks) ─────
+        if (events.BOSTimestamp <= 0) return 0.0;
+        long nowMs = priceWindow.Length > 0 ? priceWindow[^1].Timestamp : 0;
+        long bosAgeMs = nowMs - events.BOSTimestamp;
+        const long BOS_RECENT_MS = 600_000; // 10 minutes
+        if (bosAgeMs > BOS_RECENT_MS) return 0.0;
+
+        // ── Penetration depth ─────────────────────────────────────
         double penetrationPct = events.SwingHigh > 0 && events.BOSPrice > 0
             ? Math.Abs(events.BOSPrice - (events.IsBullishSweep ? events.SwingHigh : events.SwingLow))
               / (events.IsBullishSweep ? events.SwingHigh : events.SwingLow) * 100
             : 0;
-        return Normalize(penetrationPct, 0.3);
+        double depthScore = Normalize(penetrationPct, 0.2); // 0.2% penetration → 1.0
+
+        // ── Recency bonus ─────────────────────────────────────────
+        double recencyScore = Clamp01(1.0 - (double)bosAgeMs / BOS_RECENT_MS);
+
+        // ── Direction alignment ───────────────────────────────────
+        bool bosAlignedWithSweep = (events.IsBullishSweep && events.BullishBOS)
+                                || (!events.IsBullishSweep && events.BearishBOS);
+        // Give baseline 0.15 for any recent BOS; aligned gets full weight
+        double baseScore = depthScore * 0.5 + recencyScore * 0.3;
+        if (!bosAlignedWithSweep) baseScore *= 0.3; // against-sweep BOS = still informative, lower weight
+
+        return Clamp01(baseScore + 0.10); // floor of 0.10 for any recent BOS
     }
 
     /// <summary>
@@ -836,7 +856,7 @@ public static class StructureScorers
         double doubleStructScore = ScoreDoubleStructure(events, cfg);
 
         // ── Structure/BOS scorers (S1–S2) ────────────────────────
-        double bosScore = ScoreBOS(events, cfg);
+        double bosScore = ScoreBOS(events, priceWindow, cfg);
         double chochScore = ScoreCHoCH(events, cfg);
 
         // ── Manipulation/Liquidity scorers (M1–M3) ───────────────
