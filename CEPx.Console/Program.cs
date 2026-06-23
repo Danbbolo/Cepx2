@@ -163,10 +163,17 @@ static DayResult RunDay(int year, int month, int day)
             if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
             {
                 PolicyEngine.DiagReEvalAttempts++;
-                // Build ActiveEventSnapshot from current TTL state
+                // Build ActiveEventSnapshot from current TTL state + trackers
                 var snapshot = PolicyEngine.SnapshotActiveEvents(
                     ticks[i].Timestamp, pendingSweepOrigin, pendingSweepIsBullish,
-                    0, volTracker.DailyAvgVolume);
+                    0, volTracker.DailyAvgVolume, volTracker.RecentAvgVolume,
+                    volTracker.IsVolumeExpanding, volTracker.IsThinVolume, volTracker.VolumeRatio,
+                    swingTracker.SwingHigh, swingTracker.SwingLow,
+                    swingTracker.CurrentSwingRange, swingTracker.LastSwingDirection,
+                    swingTracker.BullishBOS, swingTracker.BearishBOS,
+                    swingTracker.BOSPrice, swingTracker.BOSTimestamp,
+                    swingTracker.BullishCHoCH, swingTracker.BearishCHoCH,
+                    swingTracker.CHoCHTimestamp);
                 var freshState = ScoringEngine.RefreshState(w10, snapshot);
                 PolicyEngine.UpdateCandidate(freshState,
                     exhaustion != null, absorption != null, reclaim != null,

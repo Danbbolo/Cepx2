@@ -506,7 +506,12 @@ public static class PolicyEngine
     /// Checks timestamps against TTL windows and returns only active events.
     /// </summary>
     public static ActiveEventSnapshot SnapshotActiveEvents(
-        long nowMs, double sweepOrigin, bool isBullish, double kalmanVelocity, double dailyAvgVolume = 0)
+        long nowMs, double sweepOrigin, bool isBullish, double kalmanVelocity,
+        double dailyAvgVolume, double recentAvgVolume,
+        bool isVolumeExpanding, bool isThinVolume, double volumeRatio,
+        double swingHigh, double swingLow, double currentSwingRange, int lastSwingDirection,
+        bool bullishBOS, bool bearishBOS, double bosPrice, long bosTimestamp,
+        bool bullishCHoCH, bool bearishCHoCH, long chochTimestamp)
     {
         // ── Reversal signals ──
         CepEvent? reclaim = null;
@@ -539,7 +544,11 @@ public static class PolicyEngine
             cleanCont = new CepEvent(_lastNoAbsTimestamp, "BTCUSDT", "NoMeaningfulAbsorption", 0,
                 $"score:{_lastNoAbsScore:F2}");
 
-        return new ActiveEventSnapshot(sweepOrigin, isBullish, kalmanVelocity, dailyAvgVolume,
+        return new ActiveEventSnapshot(sweepOrigin, isBullish, kalmanVelocity,
+            dailyAvgVolume, recentAvgVolume, isVolumeExpanding, isThinVolume, volumeRatio,
+            swingHigh, swingLow, currentSwingRange, lastSwingDirection,
+            bullishBOS, bearishBOS, bosPrice, bosTimestamp,
+            bullishCHoCH, bearishCHoCH, chochTimestamp,
             reclaim, exhaustion, absorption, liqCluster, momPer, cleanCont);
     }
 
