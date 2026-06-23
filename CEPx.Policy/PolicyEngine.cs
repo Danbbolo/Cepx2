@@ -25,6 +25,8 @@ public static class PolicyEngine
     private const double VELOCITY_FLIP_MIN_MAGNITUDE = 0.8;
     private const double VELOCITY_FLIP_SIM_GATE = 0.25;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
+    private const double MODE_B_REV_MARGIN = 0.0; // disabled — margin hurts PnL
+    private const double MODE_B_ANOMALY_MAX = 0.4;
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const int MODE_B_MAX_SWEEP_AGE = 8;
 
@@ -191,7 +193,7 @@ public static class PolicyEngine
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a", 1.0);
             }
 
-            // MODE B: Reversal (sweep exhausted, trap detected)
+            // MODE B: Reversal (strict — fewer, better entries)
             bool revRegimeOk = regime == "chop"
                 || (isBull && regime == "downtrend")
                 || (!isBull && regime == "uptrend");
@@ -201,7 +203,8 @@ public static class PolicyEngine
                 || (!isBull && vel > 0);
             bool sweepRecent = (currentTickIndex - _lastSweepTick) <= MODE_B_MAX_SWEEP_AGE;
             bool revStrongerThanCont = rev > state.PatternSimilarity;
-            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont)
+            bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
+            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);
