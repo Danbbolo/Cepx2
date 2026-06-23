@@ -64,10 +64,30 @@ static DayResult RunDay(int year, int month, int day)
     PolicyEngine.Reset();
 
     var buf = new MarketEvent[10];
+    double pendingSweepOrigin = 0;
+    bool pendingSweepIsBullish = false;
+    int postSweepTicksLeft = 0;
+
     for (int i = 0; i < ticks.Length; i++)
     {
         buf[i % 10] = ticks[i];
 
+        // ── Post-sweep detectors: check for reclaim/absorption/exhaustion on subsequent ticks ──
+        if (postSweepTicksLeft > 0 && i >= 9)
+        {
+            postSweepTicksLeft--;
+            var w10 = new MarketEvent[10];
+            for (int j = 0; j < 10; j++) w10[j] = buf[(i - 9 + j) % 10];
+
+            var reclaim = PipelineFunctions.DetectReclaim(w10, pendingSweepOrigin, pendingSweepIsBullish);
+            if (reclaim != null) PolicyEngine.RecordEvent(reclaim.Value);
+            var absorption = PipelineFunctions.DetectAbsorption(w10);
+            if (absorption != null) PolicyEngine.RecordEvent(absorption.Value);
+            var exhaustion = PipelineFunctions.DetectExhaustionPulse(w10);
+            if (exhaustion != null) PolicyEngine.RecordEvent(exhaustion.Value);
+        }
+
+        // ── Exit check when in position ──
         if (PolicyEngine.InPosition && i >= 9)
         {
             var w10 = new MarketEvent[10];
@@ -87,6 +107,11 @@ static DayResult RunDay(int year, int month, int day)
         var sweep = PipelineFunctions.DetectSweepStart(w5);
         if (sweep == null) continue;
 
+        // Track sweep for post-sweep detectors
+        pendingSweepOrigin = w5[0].Price;
+        pendingSweepIsBullish = sweep.Value.Context == "bullish";
+        postSweepTicksLeft = 10; // monitor next 10 ticks
+
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
         for (int j = 0; j < 10; j++) scoreW10[j] = buf[(i - 9 + j) % 10];
@@ -95,14 +120,6 @@ static DayResult RunDay(int year, int month, int day)
 
         double sweepOrigin = w5[0].Price;
         bool isBullish = sweep.Value.Context == "bullish";
-
-        // ── EventGrammar: feed absorption/exhaustion/reclaim to Policy ──
-        var reclaim = PipelineFunctions.DetectReclaim(scoreW10, sweepOrigin, isBullish);
-        if (reclaim != null) PolicyEngine.RecordEvent(reclaim.Value);
-        var absorption = PipelineFunctions.DetectAbsorption(scoreW10);
-        if (absorption != null) PolicyEngine.RecordEvent(absorption.Value);
-        var exhaustion = PipelineFunctions.DetectExhaustionPulse(scoreW10);
-        if (exhaustion != null) PolicyEngine.RecordEvent(exhaustion.Value);
 
         var decision = PolicyEngine.Decide(state, i, ticks[i].Price, sweepOrigin, isBullish);
 
