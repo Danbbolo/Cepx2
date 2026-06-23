@@ -159,6 +159,31 @@ static DayResult RunDay(int year, int month, int day)
             var noAbs = NoMeaningfulAbsorptionDetector.Detect(w10);
             if (noAbs != null) PolicyEngine.RecordEvent(noAbs.Value);
 
+            // ── Phase B: New structure detectors ──────────────────
+            int ticksSinceSwing = i - Math.Max(
+                (int)(swingTracker.SwingHighTimestamp > 0 ? swingTracker.SwingHighTimestamp : 0),
+                (int)(swingTracker.SwingLowTimestamp > 0 ? swingTracker.SwingLowTimestamp : 0));
+            var consolidation = ConsolidationDetector.Detect(w10,
+                swingTracker.CurrentSwingRange, volTracker.RecentAvgVolume,
+                volTracker.DailyAvgVolume, ticksSinceSwing);
+            if (consolidation != null) PolicyEngine.RecordEvent(consolidation.Value);
+
+            var doubleStruct = DoubleStructureDetector.Detect(w10,
+                swingTracker.SwingHigh, swingTracker.SwingLow,
+                swingTracker.CurrentSwingRange,
+                swingTracker.SwingHighTimestamp, swingTracker.SwingLowTimestamp,
+                ticksSinceSwing);
+            if (doubleStruct != null) PolicyEngine.RecordEvent(doubleStruct.Value);
+
+            var stopHunt = StopHuntDetector.Detect(w10,
+                swingTracker.SwingHigh, swingTracker.SwingLow,
+                swingTracker.BullishBOS, swingTracker.BearishBOS,
+                swingTracker.BOSPrice, swingTracker.BOSTimestamp,
+                swingTracker.BullishCHoCH, swingTracker.BearishCHoCH,
+                volTracker.IsVolumeExpanding);
+            if (stopHunt != null) PolicyEngine.RecordEvent(stopHunt.Value);
+            // END PHASE B
+
             // ── Any reversal signal → update candidate evidence only ──
             if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
             {

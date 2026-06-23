@@ -467,6 +467,28 @@ public static class PolicyEngine
             _lastNoAbsTimestamp = evt.Timestamp;
             _lastNoAbsScore = ParseEventScore(evt.Context);
         }
+        // ── Phase B: New structure events ─────────────────────────
+        else if (evt.Type == "Consolidation")
+        {
+            // Consolidation is meta — sets context, not a directional signal.
+            // Tracked for diagnostics; no separate TTL state needed yet.
+        }
+        else if (evt.Type == "DoubleTop" || evt.Type == "DoubleBottom")
+        {
+            // Double structure = reversal signal. Store as event with TTL.
+            _lastEventType = evt.Type;
+            _lastEventTimestamp = evt.Timestamp;
+            _lastEventScore = ParseEventScore(evt.Context);
+        }
+        else if (evt.Type == "StopHunt")
+        {
+            // Stop hunt = reversal signal with trap confirmation.
+            // Store with longer TTL (same as liq cluster) since traps can develop slowly.
+            _lastEventType = evt.Type;
+            _lastEventTimestamp = evt.Timestamp;
+            _lastEventScore = ParseEventScore(evt.Context);
+        }
+        // END PHASE B
     }
 
     /// <summary>Parse event score from context string (format: "score:0.72" or "prefix:score:0.65").</summary>
