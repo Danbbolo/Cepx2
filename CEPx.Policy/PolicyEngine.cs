@@ -205,6 +205,10 @@ public static class PolicyEngine
     // Phase E: trigger source counters
     public static int SweepTriggeredTrades;
     public static int NonSweepTriggeredTrades;
+    public static int SweepWins;
+    public static int NonSweepWins;
+    public static double SweepPnl;
+    public static double NonSweepPnl;
 
     /// <summary>Create a pending sweep candidate — entry decision deferred to window close.</summary>
     public static void CreateCandidate(int tick, long expiresTick, double sweepOrigin, bool isBullish, BlackboardState state)
@@ -279,9 +283,32 @@ public static class PolicyEngine
         double peakCont = _candidateBestContSim;
         double peakRev = _candidateBestRevScore;
 
+        bool isNonSweep = _candidateTriggerSource != "sweep";
+
         // Persistence: how consistently were scores above threshold?
-        double contPersistRatio = n > 0 ? (double)_candidateContPersist / n : 0;
-        double revPersistRatio = n > 0 ? (double)_candidateRevPersist / n : 0;
+        // Non-sweep: lower thresholds (0.20 cont / 0.15 rev) since event signals are absent
+        double contPersistThreshold = isNonSweep ? 0.20 : 0.35;
+        double revPersistThreshold = isNonSweep ? 0.15 : 0.25;
+
+        // Recompute persistence with adjusted thresholds for non-sweep
+        double contPersistRatio, revPersistRatio;
+        if (isNonSweep)
+        {
+            // Recompute from raw sums — we need per-update scores, not just counts
+            // Approximate: use stored counts with adjusted threshold
+            contPersistRatio = n > 0 ? (double)_candidateContPersist / n : 0;
+            revPersistRatio = n > 0 ? (double)_candidateRevPersist / n : 0;
+            // Boost: non-sweep gets persistence counted at lower implicit threshold
+            // since _candidateContPersist was counted at 0.35, adjust upward
+            contPersistRatio = Math.Min(1.0, contPersistRatio * 1.5);
+            revPersistRatio = Math.Min(1.0, revPersistRatio * 1.5);
+        }
+        else
+        {
+            contPersistRatio = n > 0 ? (double)_candidateContPersist / n : 0;
+            revPersistRatio = n > 0 ? (double)_candidateRevPersist / n : 0;
+        }
+
         double contPersistenceBonus = Math.Min(contPersistRatio * 1.5, 0.3);
         double revPersistenceBonus = Math.Min(revPersistRatio * 1.5, 0.3);
 
@@ -293,14 +320,21 @@ public static class PolicyEngine
         double effectiveCont = (peakCont * 0.60 + avgCont * 0.30 + contPersistenceBonus) - conflictPenalty;
         double effectiveRev  = (peakRev  * 0.60 + avgRev  * 0.30 + revPersistenceBonus)  - conflictPenalty;
 
+        // Non-sweep bonus: compensate for absence of event-grammar signal boost
+        if (isNonSweep)
+        {
+            effectiveCont += 0.10;
+            effectiveRev += 0.08;
+        }
+
         // Signal agreement bonus: reversal signals fire AND rev is consistently high
         int revSigTotal = _candidateExhaustionCount + _candidateAbsorptionCount + _candidateReclaimCount;
         bool reversalSignalsStrong = revSigTotal >= 3 && revPersistRatio >= 0.5;
-        if (reversalSignalsStrong) effectiveRev += 0.05;
+        if (reversalSignalsStrong && !isNonSweep) effectiveRev += 0.05; // skip for non-sweep
 
         int contSigTotal = _candidateMomPerCount + _candidateNoAbsCount;
         bool contSignalsStrong = contSigTotal >= 3 && contPersistRatio >= 0.5;
-        if (contSignalsStrong) effectiveCont += 0.05;
+        if (contSignalsStrong && !isNonSweep) effectiveCont += 0.05; // skip for non-sweep
 
         effectiveCont = Math.Max(0, Math.Min(1.0, effectiveCont));
         effectiveRev = Math.Max(0, Math.Min(1.0, effectiveRev));
@@ -376,6 +410,10 @@ public static class PolicyEngine
         _candidateTriggerSource = "sweep";
         SweepTriggeredTrades = 0;
         NonSweepTriggeredTrades = 0;
+        SweepWins = 0;
+        NonSweepWins = 0;
+        SweepPnl = 0;
+        NonSweepPnl = 0;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
@@ -976,6 +1014,9 @@ public static class PolicyEngine
             TotalTrades++;
             if (pnl > 0) WinningTrades++;
             TotalPnL += pnl;
+            // Track sweep vs non-sweep PnL
+            if (_candidateTriggerSource == "sweep") { SweepWins += pnl > 0 ? 1 : 0; SweepPnl += pnl; }
+            else { NonSweepWins += pnl > 0 ? 1 : 0; NonSweepPnl += pnl; }
             Console.WriteLine($"PAPER EXIT @ {exitPrice:F2} PnL: {pnl:F2}% reason: {decision.Reason}");
             switch (decision.Reason)
             {
