@@ -12,4 +12,6 @@ public class EventGrammarConfig
     public int BreakoutRangeWindow { get; set; } = 10;
     public double ExhaustionMovePct { get; set; } = 0.3;
     public double ExhaustionReversalRatio { get; set; } = 0.5;
+    public int ExhaustionWindow { get; set; } = 6;
+    public double ExhaustionStallRatio { get; set; } = 0.3;
 }
