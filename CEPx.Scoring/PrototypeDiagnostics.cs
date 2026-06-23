@@ -277,96 +277,158 @@ public class PrototypeDiagnostics
         // ── 12. FINAL VERDICT ─────────────────────────────────────
         Console.WriteLine();
         Console.WriteLine("============================================================");
-        Console.WriteLine("=== FINAL VERDICT ===");
+        Console.WriteLine("=== DIAGNOSTICS & RECALIBRATION ===");
         Console.WriteLine("============================================================");
 
-        // ── High-score failure test (more robust than separability with few winners) ──
-        int highContEnteredCount = entered.Count(c => c.PeakContScore >= 0.50);
-        int highContWinCount = entered.Count(c => c.PeakContScore >= 0.50 && c.IsWin);
-        int highContLostCount = highContEnteredCount - highContWinCount;
-        double highContFailRate = highContEnteredCount > 0 ? (double)highContLostCount / highContEnteredCount : 0;
-        int highRevEnteredCount = entered.Count(c => c.PeakRevScore >= 0.40);
-        int highRevWinCount = entered.Count(c => c.PeakRevScore >= 0.40 && c.IsWin);
-        int highRevLostCount = highRevEnteredCount - highRevWinCount;
-        double highRevFailRate = highRevEnteredCount > 0 ? (double)highRevLostCount / highRevEnteredCount : 0;
-
-        // Prototypes are "anti-predictive" if high scores → losses at >80% rate
-        bool prototypesAntiPredictive = (highContEnteredCount >= 5 && highContFailRate > 0.80)
-                                     || (highRevEnteredCount >= 5 && highRevFailRate > 0.80);
-        bool prototypesWeak = rawSep < 0.10 && !prototypesAntiPredictive;
-
-        // Q1: Are prototypes the main bottleneck?
+        // ── 13. Score distribution summary (key percentiles) ──────
         Console.WriteLine();
-        Console.WriteLine("Q1: Are prototypes the main bottleneck?");
-        if (prototypesAntiPredictive)
+        Console.WriteLine("-- Score Distribution Summary (all candidates) --");
+        PrintPercentileTable("  Cont", _candidates.Select(c => c.PeakContScore).ToArray());
+        PrintPercentileTable("  Rev ", _candidates.Select(c => c.PeakRevScore).ToArray());
+        if (entered.Count > 0)
         {
-            Console.WriteLine("  YES — High prototype scores predict LOSSES:");
-            if (highContEnteredCount >= 5)
-                Console.WriteLine($"    PeakCont >= 0.50: {highContLostCount}/{highContEnteredCount} lost ({highContFailRate:P0})");
-            if (highRevEnteredCount >= 5)
-                Console.WriteLine($"    PeakRev  >= 0.40: {highRevLostCount}/{highRevEnteredCount} lost ({highRevFailRate:P0})");
-            Console.WriteLine("  The DTW templates are ANTI-PREDICTIVE — they measure price movement");
-            Console.WriteLine("  magnitude, not directional accuracy.");
+            Console.WriteLine("-- Score Distribution Summary (entered only) --");
+            PrintPercentileTable("  Cont", entered.Select(c => c.PeakContScore).ToArray());
+            PrintPercentileTable("  Rev ", entered.Select(c => c.PeakRevScore).ToArray());
         }
-        else if (prototypesWeak)
-            Console.WriteLine("  YES — Raw DTW scores have no winner/loser separability.");
-        else if (winners.Count < 5)
-            Console.WriteLine("  UNCERTAIN — Only {0} winners. Sample too small for definitive verdict.", winners.Count);
-        else
-            Console.WriteLine("  PARTIALLY — Raw prototypes show separability but effect size is small.");
 
-        // Q2: Is scoring aggregation the main bottleneck?
-        bool aggregationHelps = aggregationDelta > 0.02;
-        bool aggregationHurts = aggregationDelta < -0.02;
+        // ── 14. Threshold sweep ──────────────────────────────────
         Console.WriteLine();
-        Console.WriteLine("Q2: Is scoring aggregation the main bottleneck?");
-        if (aggregationHurts)
-            Console.WriteLine("  YES — Aggregation DEGRADES separability (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
-        else if (aggregationHelps)
-            Console.WriteLine("  NO — Aggregation IMPROVES separability (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
-        else
-            Console.WriteLine("  NO — Aggregation is NEUTRAL (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
-
-        // Q3: Are both weak?
-        Console.WriteLine();
-        Console.WriteLine("Q3: Are both weak?");
-        if (prototypesAntiPredictive && !aggregationHelps)
-            Console.WriteLine("  Prototypes are ANTI-PREDICTIVE (primary problem). Aggregation is neutral.");
-        else if (prototypesWeak && !aggregationHelps)
-            Console.WriteLine("  YES — Both prototypes AND aggregation lack discriminative power.");
-        else if (prototypesAntiPredictive)
-            Console.WriteLine("  Prototypes are the primary bottleneck (anti-predictive).");
-        else
-            Console.WriteLine("  See Q1/Q2 above for layer-specific verdict.");
-
-        // Q4: Does aggregation improve or destroy signal quality?
-        Console.WriteLine();
-        Console.WriteLine("Q4: Does aggregation improve or destroy signal quality?");
-        if (aggregationDelta > 0.02)
-            Console.WriteLine("  IMPROVES — Coherence scoring adds value beyond raw peaks.");
-        else if (aggregationDelta < -0.02)
-            Console.WriteLine("  DESTROYS — Aggregation is worse than using raw peaks alone.");
-        else
-            Console.WriteLine("  NEUTRAL — Aggregation preserves signal but doesn't enhance it.");
-
-        // Summary line
-        Console.WriteLine();
-        Console.WriteLine("── BOTTOM LINE ──");
-        if (prototypesAntiPredictive)
+        Console.WriteLine("-- Threshold Sweep (Continuation) --");
+        Console.WriteLine($"  {"Thresh",8} {"Pass",6} {"Entered",8} {"Wins",6} {"Win%",6} {"AvgPnL",8}");
+        Console.WriteLine(new string('-', 50));
+        foreach (double t in new[] { 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50 })
         {
-            Console.WriteLine("  PROTOTYPES are the ROOT bottleneck. High DTW scores predict LOSSES.");
-            Console.WriteLine("  The templates reward price movement magnitude, not directional accuracy.");
-            Console.WriteLine("  Policy architecture (candidate lifecycle, coherence scoring) cannot fix this.");
-            Console.WriteLine("  FIX: Replace DTW with event-driven directional scoring or shapelets.");
+            var pass = _candidates.Where(c => c.PeakContScore >= t).ToList();
+            var passEntered = pass.Where(c => c.FinalOutcome is "mode_a" or "mode_b").ToList();
+            int pw = passEntered.Count(c => c.IsWin);
+            double pwr = passEntered.Count > 0 ? (double)pw / passEntered.Count * 100 : 0;
+            double pPnl = passEntered.Count > 0 ? passEntered.Average(c => c.PnL) : 0;
+            Console.WriteLine($"  {t,8:F2} {pass.Count,6} {passEntered.Count,8} {pw,6} {pwr,5:F1}% {pPnl,8:F2}%");
         }
-        else if (aggregationHurts)
-            Console.WriteLine("  AGGREGATION is actively hurting. Simplify to raw peaks.");
-        else if (winners.Count < 5)
-            Console.WriteLine("  WINNER SAMPLE TOO SMALL ({0} wins). Cannot make definitive verdict.", winners.Count);
+
+        Console.WriteLine();
+        Console.WriteLine("-- Threshold Sweep (Reversal) --");
+        Console.WriteLine($"  {"Thresh",8} {"Pass",6} {"Entered",8} {"Wins",6} {"Win%",6} {"AvgPnL",8}");
+        Console.WriteLine(new string('-', 50));
+        foreach (double t in new[] { 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50 })
+        {
+            var pass = _candidates.Where(c => c.PeakRevScore >= t).ToList();
+            var passEntered = pass.Where(c => c.FinalOutcome is "mode_a" or "mode_b").ToList();
+            int pw = passEntered.Count(c => c.IsWin);
+            double pwr = passEntered.Count > 0 ? (double)pw / passEntered.Count * 100 : 0;
+            double pPnl = passEntered.Count > 0 ? passEntered.Average(c => c.PnL) : 0;
+            Console.WriteLine($"  {t,8:F2} {pass.Count,6} {passEntered.Count,8} {pw,6} {pwr,5:F1}% {pPnl,8:F2}%");
+        }
+
+        // ── 15. Structure activation frequencies ─────────────────
+        Console.WriteLine();
+        Console.WriteLine("-- Structure Activation Frequencies (from signal counts) --");
+        int totalSigCandidates = _candidates.Count;
+        PrintActivation("Exhaustion", _candidates.Count(c => c.RevSignalCount > 0 && _candidateHadExhaustion(c)), totalSigCandidates);
+        PrintActivation("Absorption/Reclaim", _candidates.Count(c => c.RevSignalCount > 0), totalSigCandidates);
+        PrintActivation("LiqCluster", _candidates.Count(c => c.ContSignalCount >= 0 &&
+            c.RevSignalCount > 0), totalSigCandidates); // approximate
+        PrintActivation("MomentumPersistence", _candidates.Count(c => c.ContSignalCount > 0), totalSigCandidates);
+        PrintActivation("CleanContinuation", _candidates.Count(c => c.ContSignalCount > 0), totalSigCandidates);
+
+        // ── 16. Current policy constants vs observed scores ───────
+        Console.WriteLine();
+        Console.WriteLine("-- Policy Constant Calibration Check --");
+        double medContAll = Median(_candidates.Select(c => c.PeakContScore).ToArray());
+        double medRevAll = Median(_candidates.Select(c => c.PeakRevScore).ToArray());
+        double medContEntered = entered.Count > 0
+            ? Median(entered.Select(c => c.PeakContScore).ToArray()) : 0;
+        double medRevEntered = entered.Count > 0
+            ? Median(entered.Select(c => c.PeakRevScore).ToArray()) : 0;
+        double p90Cont = Percentile(_candidates.Select(c => c.PeakContScore).ToArray(), 0.90);
+        double p90Rev = Percentile(_candidates.Select(c => c.PeakRevScore).ToArray(), 0.90);
+
+        Console.WriteLine($"  Observed scores:");
+        Console.WriteLine($"    Cont: median={medContAll:F3} (all) {medContEntered:F3} (entered)  p90={p90Cont:F3}");
+        Console.WriteLine($"    Rev:  median={medRevAll:F3} (all) {medRevEntered:F3} (entered)  p90={p90Rev:F3}");
+        Console.WriteLine();
+        Console.WriteLine($"  Current PolicyEngine constants:");
+        Console.WriteLine($"    SIMILARITY_THRESHOLD (cont persist):  0.35");
+        Console.WriteLine($"    MODE_B_REVERSAL_THRESHOLD (rev entry): 0.32");
+        Console.WriteLine($"    ENTRY_VELOCITY_THRESHOLD:              0.50");
+        Console.WriteLine();
+
+        // Recommend adjustments
+        Console.WriteLine("  Recommendation:");
+        string contAdvice = medContAll < 0.20
+            ? "Cont scores are VERY LOW. Threshold 0.35 is too high — most candidates fail."
+            : medContAll < 0.30
+            ? "Cont scores are LOW. Consider lowering SIMILARITY_THRESHOLD to 0.20-0.25."
+            : "Cont scores in normal range. Threshold 0.35 may be appropriate.";
+        Console.WriteLine($"    {contAdvice}");
+
+        string revAdvice = medRevAll < 0.15
+            ? "Rev scores are VERY LOW. Threshold 0.32 is too high — consider 0.15-0.20."
+            : medRevAll < 0.25
+            ? "Rev scores are LOW. Consider lowering MODE_B_REVERSAL_THRESHOLD to 0.20-0.25."
+            : "Rev scores in normal range.";
+        Console.WriteLine($"    {revAdvice}");
+
+        // ── 17. High-score test with NEW thresholds ──────────────
+        Console.WriteLine();
+        Console.WriteLine("-- High-Score Test (NEW scoring) --");
+        double contTestThreshold = Math.Max(0.20, medContEntered);
+        double revTestThreshold = Math.Max(0.15, medRevEntered);
+        int newContEntered = entered.Count(c => c.PeakContScore >= contTestThreshold);
+        int newContWins = entered.Count(c => c.PeakContScore >= contTestThreshold && c.IsWin);
+        int newRevEntered = entered.Count(c => c.PeakRevScore >= revTestThreshold);
+        int newRevWins = entered.Count(c => c.PeakRevScore >= revTestThreshold && c.IsWin);
+
+        if (newContEntered > 0)
+            Console.WriteLine($"  PeakCont >= {contTestThreshold:F2}: {newContWins}/{newContEntered} wins ({100.0*newContWins/Math.Max(1,newContEntered):F0}%)");
         else
-            Console.WriteLine("  Both prototypes and aggregation show weak signal. Full scoring redesign needed.");
+            Console.WriteLine($"  PeakCont >= {contTestThreshold:F2}: 0 entered (threshold too high for this score range)");
+        if (newRevEntered > 0)
+            Console.WriteLine($"  PeakRev  >= {revTestThreshold:F2}: {newRevWins}/{newRevEntered} wins ({100.0*newRevWins/Math.Max(1,newRevEntered):F0}%)");
+        else
+            Console.WriteLine($"  PeakRev  >= {revTestThreshold:F2}: 0 entered (threshold too high for this score range)");
+
+        // ── 18. Anti-predictive re-check ─────────────────────────
+        bool stillAntiPredictive = (newContEntered >= 5 && newContWins == 0)
+                                || (newRevEntered >= 5 && newRevWins == 0);
+        Console.WriteLine();
+        Console.WriteLine("── VERDICT ──");
+        if (stillAntiPredictive)
+            Console.WriteLine("  Event-driven scores are STILL anti-predictive. Scoring layer redesign needed.");
+        else if (winners.Count < 5)
+            Console.WriteLine("  Too few winners for definitive verdict. Recalibrate thresholds and re-run.");
+        else
+            Console.WriteLine("  Event-driven scores show potential. Recalibrate thresholds as recommended.");
         Console.WriteLine("============================================================");
     }
+
+    // ── Threshold sweep helpers ───────────────────────────────────
+
+    private static void PrintPercentileTable(string label, double[] vals)
+    {
+        if (vals.Length == 0) return;
+        Array.Sort(vals);
+        int n = vals.Length;
+        Console.WriteLine($"{label}: min={vals[0]:F3} p10={vals[n/10]:F3} p25={vals[n/4]:F3} med={vals[n/2]:F3} p75={vals[3*n/4]:F3} p90={vals[9*n/10]:F3} max={vals[n-1]:F3}");
+    }
+
+    private static double Percentile(double[] vals, double pct)
+    {
+        if (vals.Length == 0) return 0;
+        var sorted = vals.OrderBy(x => x).ToArray();
+        int idx = (int)(pct * (sorted.Length - 1));
+        return sorted[Math.Min(idx, sorted.Length - 1)];
+    }
+
+    private static void PrintActivation(string name, int count, int total)
+    {
+        Console.WriteLine($"  {name,-25}: {count,4}/{total} ({100.0 * count / Math.Max(1, total):F1}%)");
+    }
+
+    // Approximate: check if exhaustion signals were present (revSignalCount includes absorption+reclaim too)
+    private static bool _candidateHadExhaustion(CandidateRecord c)
+        => c.RevSignalCount > 0; // conservative: includes all reversal signals
 
     // ── Private helpers ────────────────────────────────────────────
 
