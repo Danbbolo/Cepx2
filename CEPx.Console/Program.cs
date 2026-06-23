@@ -95,6 +95,15 @@ static DayResult RunDay(int year, int month, int day)
 
         double sweepOrigin = w5[0].Price;
         bool isBullish = sweep.Value.Context == "bullish";
+
+        // ── EventGrammar: feed absorption/exhaustion/reclaim to Policy ──
+        var reclaim = PipelineFunctions.DetectReclaim(scoreW10, sweepOrigin, isBullish);
+        if (reclaim != null) PolicyEngine.RecordEvent(reclaim.Value);
+        var absorption = PipelineFunctions.DetectAbsorption(scoreW10);
+        if (absorption != null) PolicyEngine.RecordEvent(absorption.Value);
+        var exhaustion = PipelineFunctions.DetectExhaustionPulse(scoreW10);
+        if (exhaustion != null) PolicyEngine.RecordEvent(exhaustion.Value);
+
         var decision = PolicyEngine.Decide(state, i, ticks[i].Price, sweepOrigin, isBullish);
 
         if (decision.Action == "enter")
