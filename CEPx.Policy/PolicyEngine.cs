@@ -123,6 +123,7 @@ public static class PolicyEngine
     public static int DiagModeABlockedEntry; // entryAllowed=false
     public static int DiagModeABlockedVel;   // velOk=false
     public static int DiagModeABlockedRev;   // rev >= 0.5
+    public static int DiagNoMansLand;        // Mode A revHi + Mode B vel both fail
     public static double DiagRevScoreSum;   // sum of all ReversalScore values seen
     public static int DiagRevScoreCount;
     public static int DiagRevScoreNearZero; // rev < 0.10
@@ -227,6 +228,7 @@ public static class PolicyEngine
         DiagModeABlockedEntry = 0;
         DiagModeABlockedVel = 0;
         DiagModeABlockedRev = 0;
+        DiagNoMansLand = 0;
         DiagRevScoreSum = 0;
         DiagRevScoreCount = 0;
         DiagRevScoreNearZero = 0;
@@ -557,6 +559,7 @@ public static class PolicyEngine
             if (!entryAllowed) DiagModeABlockedEntry++;
             if (!velOk) DiagModeABlockedVel++;
             if (rev >= 0.5) DiagModeABlockedRev++;
+            bool _diagRevHi = rev >= 0.5;
             // END DIAG
 
             // MODE B: Reversal (strict — fewer, better entries)
@@ -656,6 +659,8 @@ public static class PolicyEngine
             if (!revRegimeOk) DiagModeBBlockedRegime++;
             if (!revStrongerThanCont) DiagModeBBlockedCont++;
             if (!sweepRecent || !anomalyLow) DiagModeBBlockedOther++;
+            // DIAG: no-man's-land = Mode A blocked by revHi AND Mode B blocked by vel
+            if (_diagRevHi && !velExhausted) DiagNoMansLand++;
             // DIAG: high rev score that still didn't enter Mode B
             if (rev >= MODE_B_REVERSAL_THRESHOLD) DiagRevScoreHighNoB++;
             // END DIAG
@@ -848,6 +853,8 @@ public static class PolicyEngine
         Console.WriteLine($"  Mode A blocked: entry={DiagModeABlockedEntry} vel={DiagModeABlockedVel} revHi={DiagModeABlockedRev}");
         Console.WriteLine($"  Mode B candidates: {DiagModeBCandidates}");
         Console.WriteLine($"  Mode B blocked: vel={DiagModeBBlockedVel} rev={DiagModeBBlockedRev} regime={DiagModeBBlockedRegime} cont={DiagModeBBlockedCont} other={DiagModeBBlockedOther}");
+        if (DiagModeACandidates > 0 || DiagModeBCandidates > 0)
+            Console.WriteLine($"  No-man's-land (ModeA revHi + ModeB vel): {DiagNoMansLand} (A:{DiagModeABlockedRev} B:{DiagModeBBlockedVel})");
         Console.WriteLine($"  Noop after signal active: {DiagNoopAfterSignal}");
         Console.WriteLine($"  Re-eval attempts: {DiagReEvalAttempts}  Re-eval entries: {DiagReEvalEntries}");
         Console.WriteLine();
