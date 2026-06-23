@@ -278,12 +278,21 @@ public static class ScoringEngine
         }
 
         // If snapshot doesn't have velocity, inject Kalman result
-        var eventsWithVel = events.KalmanVelocity == 0 && vel != 0
-            ? new ActiveEventSnapshot(events.SweepOrigin, events.IsBullishSweep,
-                vel, events.DailyAvgVolume, events.Reclaim, events.Exhaustion,
-                events.Absorption, events.LiquidationCluster,
-                events.MomentumPersistence, events.CleanContinuation)
-            : events;
+        var eventsWithVel = events;
+        if (events.KalmanVelocity == 0 && vel != 0)
+        {
+            eventsWithVel = new ActiveEventSnapshot(events.SweepOrigin, events.IsBullishSweep,
+                vel, events.DailyAvgVolume, events.RecentAvgVolume,
+                events.IsVolumeExpanding, events.IsThinVolume, events.VolumeRatio,
+                events.SwingHigh, events.SwingLow, events.CurrentSwingRange,
+                events.LastSwingDirection, events.BullishBOS, events.BearishBOS,
+                events.BOSPrice, events.BOSTimestamp,
+                events.BullishCHoCH, events.BearishCHoCH, events.CHoCHTimestamp,
+                events.Reclaim, events.Exhaustion, events.Absorption,
+                events.LiquidationCluster, events.MomentumPersistence,
+                events.CleanContinuation, events.Consolidation,
+                events.DoubleStructure, events.StopHunt);
+        }
 
         // ── Call structure scorers ────────────────────────────────
         var msScore = StructureScorers.ScoreMarket(window, eventsWithVel, config);
@@ -302,7 +311,10 @@ public static class ScoringEngine
             msScore.ExhaustionScore, msScore.AbsorptionScore,
             msScore.LiqClusterScore, msScore.MomentumPersistScore,
             msScore.CleanContScore, msScore.PullbackResumeScore,
-            msScore.LowLiquidityRejectScore);
+            msScore.LowLiquidityRejectScore,
+            msScore.ConsolidationScore, msScore.DoubleStructureScore,
+            msScore.StopHuntScore, msScore.TrendContinuationScore,
+            msScore.BOSScore, msScore.CHoCHScore, msScore.MetaScore);
     }
 
     /// <summary>

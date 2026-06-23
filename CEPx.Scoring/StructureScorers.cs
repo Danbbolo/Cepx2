@@ -688,15 +688,119 @@ public static class StructureScorers
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ── Phase C: New structure scorers ───────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Score consolidation breakout: tight range + thin volume = coil before move.
+    /// Continuation signal — the breakout direction is the existing trend.
+    /// </summary>
+    public static double ScoreConsolidationBreakout(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        if (events.Consolidation == null) return 0.0;
+        double baseScore = ParseScoreFromContext(events.Consolidation.Value.Context);
+        // Boost if volume is thin (coil more likely to break)
+        if (events.IsThinVolume) baseScore = Clamp01(baseScore + 0.10);
+        return baseScore;
+    }
+
+    /// <summary>
+    /// Score trend continuation: swing direction intact (HH/HL or LL/LH sequence).
+    /// If LastSwingDirection aligns with sweep direction, trend is healthy.
+    /// </summary>
+    public static double ScoreTrendContinuation(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        bool trendAligned = (events.IsBullishSweep && events.LastSwingDirection == 1)
+                         || (!events.IsBullishSweep && events.LastSwingDirection == -1);
+        if (!trendAligned) return 0.0;
+        // Score based on swing range magnitude (larger swings = stronger trend)
+        double rangePct = events.CurrentSwingRange / Math.Max(events.SwingLow, 1) * 100;
+        return Normalize(rangePct, 0.5); // 0.5% swing range = score 1.0
+    }
+
+    /// <summary>
+    /// Score double top / double bottom: two equal swing points → reversal.
+    /// </summary>
+    public static double ScoreDoubleStructure(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        if (events.DoubleStructure == null) return 0.0;
+        return ParseScoreFromContext(events.DoubleStructure.Value.Context);
+    }
+
+    /// <summary>
+    /// Score BOS (Break of Structure): continuation signal when BOS direction
+    /// matches sweep direction.
+    /// </summary>
+    public static double ScoreBOS(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        bool bosAligned = (events.IsBullishSweep && events.BullishBOS)
+                       || (!events.IsBullishSweep && events.BearishBOS);
+        if (!bosAligned) return 0.0;
+        // Score based on how far beyond the swing level price went
+        double penetrationPct = events.SwingHigh > 0 && events.BOSPrice > 0
+            ? Math.Abs(events.BOSPrice - (events.IsBullishSweep ? events.SwingHigh : events.SwingLow))
+              / (events.IsBullishSweep ? events.SwingHigh : events.SwingLow) * 100
+            : 0;
+        return Normalize(penetrationPct, 0.3);
+    }
+
+    /// <summary>
+    /// Score CHoCH (Change of Character): BOS that reversed immediately.
+    /// Strong reversal signal — the breakout was a trap.
+    /// </summary>
+    public static double ScoreCHoCH(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        bool chochAligned = (events.IsBullishSweep && events.BearishCHoCH)  // bullish sweep → bearish CHoCH = reversal
+                         || (!events.IsBullishSweep && events.BullishCHoCH); // bearish sweep → bullish CHoCH = reversal
+        if (!chochAligned) return 0.0;
+        // CHoCH is a binary high-conviction signal
+        return 0.75;
+    }
+
+    /// <summary>
+    /// Score stop hunt: engineered liquidity grab at swing level.
+    /// Strong reversal signal — trapped traders fuel the reversal.
+    /// </summary>
+    public static double ScoreStopHunt(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        if (events.StopHunt == null) return 0.0;
+        double baseScore = ParseScoreFromContext(events.StopHunt.Value.Context);
+        // Boost if volume expanded on reversal
+        if (events.IsVolumeExpanding) baseScore = Clamp01(baseScore + 0.10);
+        return baseScore;
+    }
+
+    /// <summary>
+    /// Meta-score from volume context and regime alignment.
+    /// Applies to BOTH continuation and reversal.
+    /// </summary>
+    public static double ComputeMetaScore(
+        ActiveEventSnapshot events, ScoringConfig cfg)
+    {
+        double score = 0.0;
+        // Volume expansion = market is active (good for any entry)
+        if (events.IsVolumeExpanding) score += 0.30;
+        // Normal volume = neutral
+        else if (!events.IsThinVolume) score += 0.15;
+        // Thin volume = low conviction
+        // Volume ratio bonus
+        score += Normalize(events.VolumeRatio, 2.0) * 0.20;
+        return Clamp01(score);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // ── Aggregation: ScoreMarket ─────────────────────────────────
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Main scoring entry point. Calls all 9 structure scorers with the
-    /// current window and active event state, then aggregates into
-    /// ContinuationConviction and ReversalConviction via weighted sum.
-    ///
-    /// Returns a fully populated MarketStructureScore ready for BlackboardState conversion.
+    /// Main scoring entry point. Calls all structure scorers (legacy + new),
+    /// groups by family, applies meta-filters, and computes directional convictions.
     /// </summary>
     public static MarketStructureScore ScoreMarket(
         MarketEvent[] priceWindow,
@@ -705,38 +809,47 @@ public static class StructureScorers
     {
         var cfg = config ?? new ScoringConfig();
 
-        // ── Call all 9 scorers ────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
+        // ── Call all scorers ──────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
 
-        // Reversal scorers
-        double sweepReclaimScore = ScoreSweepReclaim(priceWindow,
-            events.SweepOrigin, events.IsBullishSweep, events.Reclaim, cfg);
-
-        double breakoutFailScore = ScoreBreakoutFail(priceWindow,
-            events.SweepOrigin, events.IsBullishSweep, cfg);
-
-        double exhaustionScore = ScoreExhaustion(priceWindow,
-            events.SweepOrigin, events.IsBullishSweep, events.Exhaustion, cfg);
-
-        double absorptionScore = ScoreAbsorption(priceWindow,
-            events.SweepOrigin, events.Absorption, cfg);
-
-        double liqClusterScore = ScoreLiquidationCluster(events.LiquidationCluster);
-
-        // Continuation scorers
+        // ── Continuation scorers (C1–C5) ──────────────────────────
         double momentumPersistScore = ScoreMomentumPersistence(priceWindow,
             events.KalmanVelocity, events.MomentumPersistence, cfg);
-
         double cleanContScore = ScoreCleanContinuation(priceWindow,
             events.CleanContinuation, cfg);
-
         double pullbackResumeScore = ScorePullbackResume(priceWindow,
             events.SweepOrigin, events.IsBullishSweep, cfg);
+        double consolidationScore = ScoreConsolidationBreakout(events, cfg);
+        double trendContScore = ScoreTrendContinuation(events, cfg);
 
-        // Direction-agnostic
+        // ── Reversal scorers (R1–R6) ─────────────────────────────
+        double sweepReclaimScore = ScoreSweepReclaim(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, events.Reclaim, cfg);
+        double exhaustionScore = ScoreExhaustion(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, events.Exhaustion, cfg);
+        double absorptionScore = ScoreAbsorption(priceWindow,
+            events.SweepOrigin, events.Absorption, cfg);
+        double liqClusterScore = ScoreLiquidationCluster(events.LiquidationCluster);
+        double breakoutFailScore = ScoreBreakoutFail(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, cfg);
+        double doubleStructScore = ScoreDoubleStructure(events, cfg);
+
+        // ── Structure/BOS scorers (S1–S2) ────────────────────────
+        double bosScore = ScoreBOS(events, cfg);
+        double chochScore = ScoreCHoCH(events, cfg);
+
+        // ── Manipulation/Liquidity scorers (M1–M3) ───────────────
+        double stopHuntScore = ScoreStopHunt(events, cfg);
         double lowLiqRejectScore = ScoreLowLiquidityReject(priceWindow,
             events.SweepOrigin, events.IsBullishSweep, events.DailyAvgVolume, cfg);
 
+        // ── Meta score ───────────────────────────────────────────
+        double metaScore = ComputeMetaScore(events, cfg);
+
+        // ═══════════════════════════════════════════════════════════
         // ── Determine active structures ───────────────────────────
+        // ═══════════════════════════════════════════════════════════
         StructureFlags flags = StructureFlags.None;
         if (sweepReclaimScore > 0)    flags |= StructureFlags.SweepReclaim;
         if (breakoutFailScore > 0)    flags |= StructureFlags.BreakoutFail;
@@ -747,54 +860,70 @@ public static class StructureScorers
         if (cleanContScore > 0)       flags |= StructureFlags.CleanContinuation;
         if (pullbackResumeScore > 0)  flags |= StructureFlags.PullbackResume;
         if (lowLiqRejectScore > 0)    flags |= StructureFlags.LowLiquidityReject;
+        if (consolidationScore > 0)   flags |= StructureFlags.ConsolidationActive;
+        if (doubleStructScore > 0)    flags |= StructureFlags.DoubleStructure;
+        if (stopHuntScore > 0)        flags |= StructureFlags.StopHunt;
+        if (trendContScore > 0)       flags |= StructureFlags.TrendContinuation;
+        if (bosScore > 0 && events.BullishBOS)  flags |= StructureFlags.BullishBOSFlag;
+        if (bosScore > 0 && events.BearishBOS)  flags |= StructureFlags.BearishBOSFlag;
+        if (chochScore > 0 && events.BullishCHoCH) flags |= StructureFlags.BullishCHoCHFlag;
+        if (chochScore > 0 && events.BearishCHoCH) flags |= StructureFlags.BearishCHoCHFlag;
 
-        // ── Compute directional convictions ───────────────────────
+        // ═══════════════════════════════════════════════════════════
+        // ── Family-based conviction ───────────────────────────────
+        // ═══════════════════════════════════════════════════════════
 
-        // Continuation conviction: weighted sum of cont structures
+        // Continuation family: best of C1–C5 + BOS aligned
+        double familyCont = new[] { momentumPersistScore, cleanContScore,
+            pullbackResumeScore, consolidationScore, trendContScore }.Max();
+        double familyBOS = bosScore; // BOS is continuation-aligned
+
+        // Reversal family: best of R1–R6
+        double familyRev = new[] { sweepReclaimScore, exhaustionScore,
+            absorptionScore, liqClusterScore, breakoutFailScore,
+            doubleStructScore }.Max();
+
+        // Manipulation family: best of M1–M3
+        double familyManip = new[] { stopHuntScore, lowLiqRejectScore }.Max();
+
+        // Continuation conviction
         double contConviction = Clamp01(
-            momentumPersistScore * cfg.MomentumPersistenceWeight +
-            cleanContScore * cfg.CleanContinuationWeight +
-            pullbackResumeScore * cfg.PullbackResumeWeight);
+            familyCont * 0.40 + familyBOS * 0.25 + metaScore * cfg.MetaWeight);
 
-        // Reversal conviction: weighted sum of rev structures
+        // Reversal conviction
         double revConviction = Clamp01(
-            sweepReclaimScore * cfg.SweepReclaimWeight +
-            exhaustionScore * cfg.ExhaustionWeight +
-            absorptionScore * cfg.AbsorptionWeight +
-            liqClusterScore * cfg.LiqClusterWeight +
-            breakoutFailScore * cfg.BreakoutFailWeight);
+            familyRev * cfg.SweepReclaimWeight / 0.25 * 0.35   // scale to family weight
+            + chochScore * cfg.CHoCHWeight
+            + familyManip * 0.20
+            + metaScore * cfg.MetaWeight);
 
-        // Combo bonus: ≥ 2 reversal structures active
-        int revActiveCount = (sweepReclaimScore > 0 ? 1 : 0)
-                           + (breakoutFailScore > 0 ? 1 : 0)
-                           + (exhaustionScore > 0 ? 1 : 0)
-                           + (absorptionScore > 0 ? 1 : 0)
-                           + (liqClusterScore > 0 ? 1 : 0);
-        if (revActiveCount >= 2)
+        // Combo bonus: ≥2 structures from different families
+        int activeFamilies = (familyCont > 0 ? 1 : 0) + (familyRev > 0 ? 1 : 0)
+                           + (familyManip > 0 ? 1 : 0) + (chochScore > 0 ? 1 : 0);
+        if (activeFamilies >= 2)
+        {
+            contConviction = Clamp01(contConviction + cfg.ComboBonus);
             revConviction = Clamp01(revConviction + cfg.ComboBonus);
+        }
 
+        // ═══════════════════════════════════════════════════════════
         // ── Build and return ──────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════
         return new MarketStructureScore(
             timestamp: priceWindow.Length > 0 ? priceWindow[^1].Timestamp : 0,
             symbol: priceWindow.Length > 0 ? priceWindow[^1].Symbol : "",
-            stateMean: 0,
-            stateVelocity: events.KalmanVelocity,
-            uncertaintyUpper: 0,
-            uncertaintyLower: 0,
-            regime: "",           // filled by WriteState
-            regimeConfidence: 0,  // filled by WriteState
+            stateMean: 0, stateVelocity: events.KalmanVelocity,
+            uncertaintyUpper: 0, uncertaintyLower: 0,
+            regime: "", regimeConfidence: 0,
             continuationConviction: contConviction,
             reversalConviction: revConviction,
             activeStructures: flags,
-            sweepReclaimScore: sweepReclaimScore,
-            breakoutFailScore: breakoutFailScore,
-            exhaustionScore: exhaustionScore,
-            absorptionScore: absorptionScore,
-            liqClusterScore: liqClusterScore,
-            momentumPersistScore: momentumPersistScore,
-            cleanContScore: cleanContScore,
-            pullbackResumeScore: pullbackResumeScore,
-            lowLiquidityRejectScore: lowLiqRejectScore);
+            sweepReclaimScore, breakoutFailScore, exhaustionScore,
+            absorptionScore, liqClusterScore,
+            momentumPersistScore, cleanContScore, pullbackResumeScore,
+            lowLiqRejectScore,
+            consolidationScore, doubleStructScore, stopHuntScore,
+            trendContScore, bosScore, chochScore, metaScore);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -807,6 +936,21 @@ public static class StructureScorers
     /// <summary>Normalize raw feature value against config target → [0, 1].</summary>
     public static double Normalize(double rawValue, double normTarget)
         => normTarget > 0 ? Clamp01(rawValue / normTarget) : 0.0;
+
+    /// <summary>Parse score from CepEvent context string (format: "score:0.72:...").</summary>
+    private static double ParseScoreFromContext(string context)
+    {
+        if (string.IsNullOrEmpty(context)) return 0.5;
+        int idx = context.IndexOf("score:");
+        if (idx < 0) return 0.5;
+        string numPart = context.Substring(idx + 6).Split(':')[0];
+        if (double.TryParse(numPart,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double score))
+            return Clamp01(score);
+        return 0.5;
+    }
 
     // ── Private scoring helpers (extracted from detectors) ──────────
 

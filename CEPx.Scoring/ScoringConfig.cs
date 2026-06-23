@@ -26,6 +26,15 @@ public class ScoringConfig
     public double LiqClusterWeight { get; set; } = 0.15;
     public double BreakoutFailWeight { get; set; } = 0.10;
 
+    // ── Phase C: New structure weights ───────────────────────────
+    public double ConsolidationWeight { get; set; } = 0.10;
+    public double DoubleStructureWeight { get; set; } = 0.15;
+    public double StopHuntWeight { get; set; } = 0.20;
+    public double TrendContinuationWeight { get; set; } = 0.20;
+    public double BOSWeight { get; set; } = 0.15;
+    public double CHoCHWeight { get; set; } = 0.25;
+    public double MetaWeight { get; set; } = 0.15;
+
     /// <summary>Bonus added to ReversalConviction when ≥ 2 reversal structures are active.</summary>
     public double ComboBonus { get; set; } = 0.15;
 

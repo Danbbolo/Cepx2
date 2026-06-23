@@ -24,6 +24,11 @@ public readonly struct ActiveEventSnapshot
     public readonly CepEvent? MomentumPersistence;
     public readonly CepEvent? CleanContinuation;
 
+    // ── Phase B/C: New structure events ──────────────────────────
+    public readonly CepEvent? Consolidation;
+    public readonly CepEvent? DoubleStructure;   // "DoubleTop" or "DoubleBottom"
+    public readonly CepEvent? StopHunt;
+
     // ── Swing state (from SwingTracker) ──────────────────────────
     public readonly double SwingHigh;
     public readonly double SwingLow;
@@ -63,7 +68,10 @@ public readonly struct ActiveEventSnapshot
         CepEvent? absorption = null,
         CepEvent? liquidationCluster = null,
         CepEvent? momentumPersistence = null,
-        CepEvent? cleanContinuation = null)
+        CepEvent? cleanContinuation = null,
+        CepEvent? consolidation = null,
+        CepEvent? doubleStructure = null,
+        CepEvent? stopHunt = null)
     {
         SweepOrigin = sweepOrigin;
         IsBullishSweep = isBullishSweep;
@@ -90,6 +98,9 @@ public readonly struct ActiveEventSnapshot
         LiquidationCluster = liquidationCluster;
         MomentumPersistence = momentumPersistence;
         CleanContinuation = cleanContinuation;
+        Consolidation = consolidation;
+        DoubleStructure = doubleStructure;
+        StopHunt = stopHunt;
     }
 
     /// <summary>
@@ -109,6 +120,7 @@ public readonly struct ActiveEventSnapshot
                dailyAvgVolume, 0, false, false, 1.0,
                0, 0, 0, 0, false, false, 0, 0, false, false, 0,
                reclaim, exhaustion, absorption, liquidationCluster,
-               momentumPersistence, cleanContinuation)
+               momentumPersistence, cleanContinuation,
+               null, null, null)
     { }
 }

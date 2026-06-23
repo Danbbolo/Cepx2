@@ -23,6 +23,16 @@ public enum StructureFlags
 
     // ── Direction-agnostic ──
     LowLiquidityReject  = 1 << 8,
+
+    // ── Phase B/C: New structures ──
+    ConsolidationActive  = 1 << 9,
+    DoubleStructure      = 1 << 10,
+    StopHunt             = 1 << 11,
+    TrendContinuation    = 1 << 12,
+    BullishBOSFlag       = 1 << 13,
+    BearishBOSFlag       = 1 << 14,
+    BullishCHoCHFlag     = 1 << 15,
+    BearishCHoCHFlag     = 1 << 16,
 }
 
 /// <summary>
@@ -67,6 +77,15 @@ public readonly struct MarketStructureScore
     public readonly double PullbackResumeScore;
     public readonly double LowLiquidityRejectScore;
 
+    // ── Phase B/C: New structure scores ──
+    public readonly double ConsolidationScore;
+    public readonly double DoubleStructureScore;
+    public readonly double StopHuntScore;
+    public readonly double TrendContinuationScore;
+    public readonly double BOSScore;
+    public readonly double CHoCHScore;
+    public readonly double MetaScore;
+
     // ── Legacy compat: same names as StructuralScore fields ──
     /// <summary>Legacy compat: maps to ContinuationConviction.</summary>
     public readonly double PatternSimilarity => ContinuationConviction;
@@ -100,7 +119,14 @@ public readonly struct MarketStructureScore
         double momentumPersistScore = 0,
         double cleanContScore = 0,
         double pullbackResumeScore = 0,
-        double lowLiquidityRejectScore = 0)
+        double lowLiquidityRejectScore = 0,
+        double consolidationScore = 0,
+        double doubleStructureScore = 0,
+        double stopHuntScore = 0,
+        double trendContinuationScore = 0,
+        double bosScore = 0,
+        double chochScore = 0,
+        double metaScore = 0)
     {
         Timestamp = timestamp;
         Symbol = symbol;
@@ -122,5 +148,12 @@ public readonly struct MarketStructureScore
         CleanContScore = cleanContScore;
         PullbackResumeScore = pullbackResumeScore;
         LowLiquidityRejectScore = lowLiquidityRejectScore;
+        ConsolidationScore = consolidationScore;
+        DoubleStructureScore = doubleStructureScore;
+        StopHuntScore = stopHuntScore;
+        TrendContinuationScore = trendContinuationScore;
+        BOSScore = bosScore;
+        CHoCHScore = chochScore;
+        MetaScore = metaScore;
     }
 }

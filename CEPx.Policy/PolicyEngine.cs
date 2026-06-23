@@ -566,12 +566,31 @@ public static class PolicyEngine
             cleanCont = new CepEvent(_lastNoAbsTimestamp, "BTCUSDT", "NoMeaningfulAbsorption", 0,
                 $"score:{_lastNoAbsScore:F2}");
 
+        // ── Phase B/C: New structure events ──────────────────────
+        CepEvent? consolidation = null;
+        if (_lastEventType == "Consolidation" && nowMs - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS)
+            consolidation = new CepEvent(_lastEventTimestamp, "BTCUSDT", "Consolidation", 0,
+                $"score:{_lastEventScore:F2}");
+
+        CepEvent? doubleStructure = null;
+        if ((_lastEventType == "DoubleTop" || _lastEventType == "DoubleBottom")
+            && nowMs - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS)
+            doubleStructure = new CepEvent(_lastEventTimestamp, "BTCUSDT", _lastEventType, 0,
+                $"score:{_lastEventScore:F2}");
+
+        CepEvent? stopHunt = null;
+        if (_lastEventType == "StopHunt" && nowMs - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS)
+            stopHunt = new CepEvent(_lastEventTimestamp, "BTCUSDT", "StopHunt", 0,
+                $"score:{_lastEventScore:F2}");
+        // END PHASE B/C
+
         return new ActiveEventSnapshot(sweepOrigin, isBullish, kalmanVelocity,
             dailyAvgVolume, recentAvgVolume, isVolumeExpanding, isThinVolume, volumeRatio,
             swingHigh, swingLow, currentSwingRange, lastSwingDirection,
             bullishBOS, bearishBOS, bosPrice, bosTimestamp,
             bullishCHoCH, bearishCHoCH, chochTimestamp,
-            reclaim, exhaustion, absorption, liqCluster, momPer, cleanCont);
+            reclaim, exhaustion, absorption, liqCluster, momPer, cleanCont,
+            consolidation, doubleStructure, stopHunt);
     }
 
     private static bool HasVelocityDirectionChanged()
