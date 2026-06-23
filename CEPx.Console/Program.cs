@@ -63,19 +63,20 @@ static DayResult RunDay(int year, int month, int day)
 
     PolicyEngine.Reset();
 
+    const long POST_SWEEP_WINDOW_MS = 600_000; // 10 minutes — monitor for events after sweep
     var buf = new MarketEvent[10];
     double pendingSweepOrigin = 0;
     bool pendingSweepIsBullish = false;
-    int postSweepTicksLeft = 0;
+    long postSweepEndMs = 0; // absolute timestamp — monitor until this time
 
     for (int i = 0; i < ticks.Length; i++)
     {
         buf[i % 10] = ticks[i];
+        long nowMs = ticks[i].Timestamp;
 
-        // ── Post-sweep detectors: check for reclaim/absorption/exhaustion on subsequent ticks ──
-        if (postSweepTicksLeft > 0 && i >= 9)
+        // ── Post-sweep detectors: time-based window after sweep ──
+        if (nowMs <= postSweepEndMs && i >= 9)
         {
-            postSweepTicksLeft--;
             var w10 = new MarketEvent[10];
             for (int j = 0; j < 10; j++) w10[j] = buf[(i - 9 + j) % 10];
 
@@ -107,10 +108,10 @@ static DayResult RunDay(int year, int month, int day)
         var sweep = PipelineFunctions.DetectSweepStart(w5);
         if (sweep == null) continue;
 
-        // Track sweep for post-sweep detectors
+        // Track sweep for post-sweep detectors — time-based window
         pendingSweepOrigin = w5[0].Price;
         pendingSweepIsBullish = sweep.Value.Context == "bullish";
-        postSweepTicksLeft = 10; // monitor next 10 ticks
+        postSweepEndMs = sweep.Value.Timestamp + POST_SWEEP_WINDOW_MS;
 
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
