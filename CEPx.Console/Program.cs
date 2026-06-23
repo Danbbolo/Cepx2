@@ -213,6 +213,7 @@ static DayResult RunDay(int year, int month, int day)
         // ── Candidate finalization: once post-sweep tick window closes ──
         if (i == postSweepEndTick && postSweepEndTick > 0)
         {
+            Console.WriteLine($"[FINALIZE-CHECK] tick={i} hasCandidate={PolicyEngine.HasActiveCandidate} inPos={PolicyEngine.InPosition}");
             if (!PolicyEngine.InPosition && PolicyEngine.HasActiveCandidate)
             {
                 var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
