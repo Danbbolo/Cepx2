@@ -237,8 +237,8 @@ public class PrototypeDiagnostics
         double fullDelta = effSep - rawSep;
         string aggVerdict = aggregationDelta > 0.02 ? "IMPROVES" : aggregationDelta < -0.02 ? "DEGRADES" : "NEUTRAL";
         string fullVerdict = fullDelta > 0.02 ? "IMPROVES" : fullDelta < -0.02 ? "DEGRADES" : "NEUTRAL";
-        Console.WriteLine($"  Aggregation delta:  {aggregationDelta:+.F4} → aggregation {aggVerdict} signal");
-        Console.WriteLine($"  Full pipeline delta: {fullDelta:+.F4} → full pipeline {fullVerdict} signal");
+        Console.WriteLine($"  Aggregation delta:  {aggregationDelta:+0.0000;-0.0000; 0.0000} → aggregation {aggVerdict} signal");
+        Console.WriteLine($"  Full pipeline delta: {fullDelta:+0.0000;-0.0000; 0.0000} → full pipeline {fullVerdict} signal");
 
         // Raw vs aggregated correlation: does aggregation preserve ranking?
         var enteredArr = entered.ToArray();
@@ -280,66 +280,91 @@ public class PrototypeDiagnostics
         Console.WriteLine("=== FINAL VERDICT ===");
         Console.WriteLine("============================================================");
 
+        // ── High-score failure test (more robust than separability with few winners) ──
+        int highContEnteredCount = entered.Count(c => c.PeakContScore >= 0.50);
+        int highContWinCount = entered.Count(c => c.PeakContScore >= 0.50 && c.IsWin);
+        int highContLostCount = highContEnteredCount - highContWinCount;
+        double highContFailRate = highContEnteredCount > 0 ? (double)highContLostCount / highContEnteredCount : 0;
+        int highRevEnteredCount = entered.Count(c => c.PeakRevScore >= 0.40);
+        int highRevWinCount = entered.Count(c => c.PeakRevScore >= 0.40 && c.IsWin);
+        int highRevLostCount = highRevEnteredCount - highRevWinCount;
+        double highRevFailRate = highRevEnteredCount > 0 ? (double)highRevLostCount / highRevEnteredCount : 0;
+
+        // Prototypes are "anti-predictive" if high scores → losses at >80% rate
+        bool prototypesAntiPredictive = (highContEnteredCount >= 5 && highContFailRate > 0.80)
+                                     || (highRevEnteredCount >= 5 && highRevFailRate > 0.80);
+        bool prototypesWeak = rawSep < 0.10 && !prototypesAntiPredictive;
+
         // Q1: Are prototypes the main bottleneck?
-        bool prototypesWeak = rawSep < 0.05;
-        bool prototypesModerate = rawSep >= 0.05 && rawSep < 0.15;
         Console.WriteLine();
         Console.WriteLine("Q1: Are prototypes the main bottleneck?");
-        if (prototypesWeak)
+        if (prototypesAntiPredictive)
+        {
+            Console.WriteLine("  YES — High prototype scores predict LOSSES:");
+            if (highContEnteredCount >= 5)
+                Console.WriteLine($"    PeakCont >= 0.50: {highContLostCount}/{highContEnteredCount} lost ({highContFailRate:P0})");
+            if (highRevEnteredCount >= 5)
+                Console.WriteLine($"    PeakRev  >= 0.40: {highRevLostCount}/{highRevEnteredCount} lost ({highRevFailRate:P0})");
+            Console.WriteLine("  The DTW templates are ANTI-PREDICTIVE — they measure price movement");
+            Console.WriteLine("  magnitude, not directional accuracy.");
+        }
+        else if (prototypesWeak)
             Console.WriteLine("  YES — Raw DTW scores have no winner/loser separability.");
-        else if (prototypesModerate)
-            Console.WriteLine("  PARTIALLY — Raw DTW has weak separability but below useful threshold.");
+        else if (winners.Count < 5)
+            Console.WriteLine("  UNCERTAIN — Only {0} winners. Sample too small for definitive verdict.", winners.Count);
         else
-            Console.WriteLine("  NO — Raw prototypes have meaningful separability.");
+            Console.WriteLine("  PARTIALLY — Raw prototypes show separability but effect size is small.");
 
         // Q2: Is scoring aggregation the main bottleneck?
         bool aggregationHelps = aggregationDelta > 0.02;
         bool aggregationHurts = aggregationDelta < -0.02;
         Console.WriteLine();
         Console.WriteLine("Q2: Is scoring aggregation the main bottleneck?");
-        if (aggregationHelps)
-            Console.WriteLine($"  NO — Aggregation IMPROVES separability by {aggregationDelta:+.F4}.");
-        else if (aggregationHurts)
-            Console.WriteLine($"  YES — Aggregation DEGRADES separability by {aggregationDelta:+.F4}.");
+        if (aggregationHurts)
+            Console.WriteLine("  YES — Aggregation DEGRADES separability (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
+        else if (aggregationHelps)
+            Console.WriteLine("  NO — Aggregation IMPROVES separability (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
         else
-            Console.WriteLine($"  NO — Aggregation is NEUTRAL (delta={aggregationDelta:+.F4}). The bottleneck is upstream.");
+            Console.WriteLine("  NO — Aggregation is NEUTRAL (delta={0:+0.0000;-0.0000; 0.0000}).", aggregationDelta);
 
         // Q3: Are both weak?
-        bool bothWeak = prototypesWeak && !aggregationHelps;
         Console.WriteLine();
         Console.WriteLine("Q3: Are both weak?");
-        if (bothWeak)
-            Console.WriteLine("  YES — Both prototypes AND aggregation are weak. The scoring pipeline has no discriminative power at any layer.");
-        else if (prototypesWeak && aggregationHelps)
-            Console.WriteLine("  PARTIALLY — Prototypes are weak but aggregation helps. The raw signal is noisy but aggregation extracts some structure.");
+        if (prototypesAntiPredictive && !aggregationHelps)
+            Console.WriteLine("  Prototypes are ANTI-PREDICTIVE (primary problem). Aggregation is neutral.");
+        else if (prototypesWeak && !aggregationHelps)
+            Console.WriteLine("  YES — Both prototypes AND aggregation lack discriminative power.");
+        else if (prototypesAntiPredictive)
+            Console.WriteLine("  Prototypes are the primary bottleneck (anti-predictive).");
         else
-            Console.WriteLine("  NO — At least one layer has meaningful signal.");
+            Console.WriteLine("  See Q1/Q2 above for layer-specific verdict.");
 
         // Q4: Does aggregation improve or destroy signal quality?
         Console.WriteLine();
         Console.WriteLine("Q4: Does aggregation improve or destroy signal quality?");
-        if (aggregationDelta > 0.01)
-            Console.WriteLine($"  IMPROVES (delta={aggregationDelta:+.F4}) — Coherence scoring adds value beyond raw peaks.");
-        else if (aggregationDelta < -0.01)
-            Console.WriteLine($"  DESTROYS (delta={aggregationDelta:+.F4}) — Aggregation is worse than using raw peaks alone.");
+        if (aggregationDelta > 0.02)
+            Console.WriteLine("  IMPROVES — Coherence scoring adds value beyond raw peaks.");
+        else if (aggregationDelta < -0.02)
+            Console.WriteLine("  DESTROYS — Aggregation is worse than using raw peaks alone.");
         else
-            Console.WriteLine($"  NEUTRAL (delta={aggregationDelta:+.F4}) — Aggregation doesn't change signal quality meaningfully.");
+            Console.WriteLine("  NEUTRAL — Aggregation preserves signal but doesn't enhance it.");
 
         // Summary line
         Console.WriteLine();
         Console.WriteLine("── BOTTOM LINE ──");
-        if (prototypesWeak && Math.Abs(aggregationDelta) < 0.02)
+        if (prototypesAntiPredictive)
         {
-            Console.WriteLine("  The prototype/scoring layer is the ROOT bottleneck. No amount of policy");
-            Console.WriteLine("  architecture (coherence scoring, candidate lifecycle, signal boosting)");
-            Console.WriteLine("  can compensate for DTW scores that don't discriminate good from bad.");
+            Console.WriteLine("  PROTOTYPES are the ROOT bottleneck. High DTW scores predict LOSSES.");
+            Console.WriteLine("  The templates reward price movement magnitude, not directional accuracy.");
+            Console.WriteLine("  Policy architecture (candidate lifecycle, coherence scoring) cannot fix this.");
+            Console.WriteLine("  FIX: Replace DTW with event-driven directional scoring or shapelets.");
         }
         else if (aggregationHurts)
-            Console.WriteLine("  Aggregation is ACTIVELY HURTING. Simplify to raw peaks or redesign aggregation.");
-        else if (prototypesModerate && aggregationHelps)
-            Console.WriteLine("  Both layers contribute. Prototypes are marginal; aggregation extracts value.");
+            Console.WriteLine("  AGGREGATION is actively hurting. Simplify to raw peaks.");
+        else if (winners.Count < 5)
+            Console.WriteLine("  WINNER SAMPLE TOO SMALL ({0} wins). Cannot make definitive verdict.", winners.Count);
         else
-            Console.WriteLine("  Prototypes AND aggregation are weak. Full scoring redesign needed.");
+            Console.WriteLine("  Both prototypes and aggregation show weak signal. Full scoring redesign needed.");
         Console.WriteLine("============================================================");
     }
 
@@ -384,7 +409,7 @@ public class PrototypeDiagnostics
         double wMean = winners.Average(selector);
         double lMean = losers.Average(selector);
         double diff = wMean - lMean;
-        Console.WriteLine($"  {label,-15}: winners={wMean:F3}  losers={lMean:F3}  diff={diff:+.F3}");
+        Console.WriteLine($"  {label,-15}: winners={wMean:F3}  losers={lMean:F3}  diff={diff:+0.000;-0.000; 0.000}");
     }
 
     private static void PrintStatLine(string label,
@@ -393,7 +418,8 @@ public class PrototypeDiagnostics
     {
         double aMean = modeA.Average(selector);
         double bMean = modeB.Average(selector);
-        Console.WriteLine($"  {label,-15}: mode_a={aMean:F3}  mode_b={bMean:F3}  diff={aMean - bMean:+.F3}");
+        double d = aMean - bMean;
+        Console.WriteLine($"  {label,-15}: mode_a={aMean:F3}  mode_b={bMean:F3}  diff={d:+0.000;-0.000; 0.000}");
     }
 
     private static double ComputePearson(double[] x, double[] y)
@@ -476,7 +502,7 @@ public class PrototypeDiagnostics
         double lMean = losers.Average(selector);
         double diff = wMean - lMean;
         string sep = Math.Abs(diff) > 0.03 ? "YES" : "no";
-        Console.WriteLine($"  {label,-20} {wMean,8:F3} {lMean,8:F3} {diff,8:+.F3} {sep,6}");
+        Console.WriteLine($"  {label,-20} {wMean,8:F3} {lMean,8:F3} {diff,8:+0.000;-0.000; 0.000} {sep,6}");
     }
 
     /// <summary>Spearman rank correlation coefficient.</summary>
