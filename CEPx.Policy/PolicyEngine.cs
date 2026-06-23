@@ -11,7 +11,8 @@ public static class PolicyEngine
     // ── Paper trading ─────────────────────────────────────────────────
     private const double COMMISSION_PCT = 0.05;
     private const double SLIPPAGE_PCT = 0.01;
-    private const int MAX_HOLD_TICKS = 40;
+    private const long MAX_HOLD_TIME_MS = 3_600_000; // 1 hour
+    private const int MAX_HOLD_TICKS = 40; // tick fallback for tests
     private const double STOP_LOSS_PCT = -1.0;
     private const double MOMENTUM_DECAY_SIM = 0.20;
     private const double MOMENTUM_DECAY_SIM_ABSOLUTE = 0.15;
@@ -19,7 +20,8 @@ public static class PolicyEngine
     private const double FLAT_VELOCITY = 0.1;
     private const double TRAPPED_REV_THRESHOLD = 0.3;
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
-    private const int TRAPPED_MAX_TICKS = 5;
+    private const long TRAPPED_MAX_TIME_MS = 300_000; // 5 minutes
+    private const int TRAPPED_MAX_TICKS = 5; // tick fallback for tests
     private const int MOMENTUM_DECAY_CONFIRM = 4; // tick fallback for tests
     private const int VELOCITY_FLIP_CONFIRM = 8; // tick fallback for tests
     private const long VELOCITY_FLIP_TIME_MS = 600_000; // 10 minutes
@@ -30,7 +32,7 @@ public static class PolicyEngine
     private const double MODE_B_REV_MARGIN = 0.0; // disabled — margin hurts PnL
     private const double MODE_B_ANOMALY_MAX = 0.4;
     private const int VELOCITY_HISTORY_TICKS = 5;
-    private const int MODE_B_MAX_SWEEP_AGE = 8;
+    private const long MODE_B_MAX_SWEEP_AGE_MS = 480_000; // 8 minutes
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -51,12 +53,13 @@ public static class PolicyEngine
     private static readonly List<double> _patternSimHistory = new();
     private static double _sweepOriginPrice;
     private static bool _sweepIsBullish;
-    private static int _ticksSinceEntry;
+    private static long _entryStartMs; // timestamp when position was entered
+    private static int _ticksSinceEntry; // tick fallback for tests
     private static int _momentumDecayTicks; // tick fallback
     private static long _momentumDecayStartMs;
     private static int _velocityFlipTicks; // tick fallback
     private static long _velocityFlipStartMs;
-    private static int _lastSweepTick = -999;
+    private static long _lastSweepMs; // timestamp of last sweep
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -67,7 +70,7 @@ public static class PolicyEngine
         EntryTick = 0;
         _sweepOriginPrice = 0;
         _sweepIsBullish = false;
-        _ticksSinceEntry = 0;
+        _entryStartMs = 0;
         _momentumDecayTicks = 0; _momentumDecayStartMs = 0;
         _velocityFlipTicks = 0; _velocityFlipStartMs = 0;
         _recentVelocities.Clear();
@@ -119,7 +122,7 @@ public static class PolicyEngine
     {
         // Record velocity every tick for direction-change detection
         RecordVelocity(state.KalmanVelocity);
-        if (state.SweepActive) _lastSweepTick = currentTickIndex;
+        if (state.SweepActive) _lastSweepMs = state.Timestamp;
 
         if (InPosition)
         {
@@ -154,14 +157,20 @@ public static class PolicyEngine
                     return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "structural_invalidation", 1.0);
             }
 
-            // 3. Trapped Order Flow
-            if (_ticksSinceEntry <= TRAPPED_MAX_TICKS
+            // 3. Trapped Order Flow — within first 5 minutes of entry
+            bool trappedFired = _entryStartMs > 0
+                ? (state.Timestamp - _entryStartMs <= TRAPPED_MAX_TIME_MS)
+                : (_ticksSinceEntry <= TRAPPED_MAX_TICKS);
+            if (trappedFired
                 && state.ReversalScore > TRAPPED_REV_THRESHOLD
                 && state.AnomalyScore > TRAPPED_ANOMALY_THRESHOLD)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "trapped_order_flow", 1.0);
 
-            // 4. Time Stop (safety net)
-            if (currentTickIndex - EntryTick >= MAX_HOLD_TICKS)
+            // 4. Time Stop (safety net) — 1 hour max hold (40-tick fallback for tests)
+            bool timeStopFired = _entryStartMs > 0
+                ? (state.Timestamp - _entryStartMs >= MAX_HOLD_TIME_MS)
+                : (_ticksSinceEntry >= 40);
+            if (timeStopFired)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "time_stop", 1.0);
 
             // 5. Stop Loss
@@ -211,6 +220,7 @@ public static class PolicyEngine
             bool velStrong = (isBull && vel > ENTRY_VELOCITY_THRESHOLD) || (!isBull && vel < -ENTRY_VELOCITY_THRESHOLD);
             if (trendAligned && velStrong && rev < 0.5)
             {
+                _entryStartMs = state.Timestamp;
                 string side = isBull ? "long" : "short";
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a", 1.0);
             }
@@ -223,11 +233,12 @@ public static class PolicyEngine
                 || Math.Abs(vel) < FLAT_VELOCITY
                 || (isBull && vel < 0)
                 || (!isBull && vel > 0);
-            bool sweepRecent = (currentTickIndex - _lastSweepTick) <= MODE_B_MAX_SWEEP_AGE;
+            bool sweepRecent = state.Timestamp - _lastSweepMs <= MODE_B_MAX_SWEEP_AGE_MS;
             bool revStrongerThanCont = rev > state.PatternSimilarity;
             bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
             if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {
+                _entryStartMs = state.Timestamp;
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);
             }
@@ -249,7 +260,6 @@ public static class PolicyEngine
             EntryTick = tickIndex;
             _sweepOriginPrice = sweepOriginPrice;
             _sweepIsBullish = isBullishSweep;
-            _ticksSinceEntry = 0;
             _momentumDecayTicks = 0; _momentumDecayStartMs = 0;
             _velocityFlipTicks = 0; _velocityFlipStartMs = 0;
             _recentVelocities.Clear();
@@ -281,7 +291,7 @@ public static class PolicyEngine
             PositionSide = "";
             _sweepOriginPrice = 0;
             _patternSimHistory.Clear();
-            _ticksSinceEntry = 0;
+            _entryStartMs = 0;
         }
     }
 

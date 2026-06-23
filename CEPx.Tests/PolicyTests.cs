@@ -79,12 +79,12 @@ public class PolicyTests
     public void Exit_fires_on_trapped_order_flow()
     {
         ResetPosition();
-        var state = MakeState(reversalScore: 0.4, anomalyScore: 0.4);
+        var state = MakeState(reversalScore: 0.4, anomalyScore: 0.4, patternSimilarity: 0.5);
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // Within 5 ticks, high reversal + high anomaly -> trapped
+        // Within first few ticks, high reversal + high anomaly -> trapped
         var result = PolicyEngine.Decide(state, currentTickIndex: 3, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("trapped_order_flow", result.Reason);
@@ -113,13 +113,15 @@ public class PolicyTests
     public void Exit_fires_on_time_stop()
     {
         ResetPosition();
-        var state = MakeState(patternSimilarity: 0.5); // keep sim high to avoid momentum_decay
+        var state = MakeState(patternSimilarity: 0.5);
         PolicyEngine.InPosition = true;
         PolicyEngine.PositionSide = "long";
         PolicyEngine.EntryPrice = 42000;
         PolicyEngine.EntryTick = 0;
-        // 40 ticks later -> time stop (was 20, now 40)
-        var result = PolicyEngine.Decide(state, currentTickIndex: 40, currentPrice: 42100);
+        // Call 40 times — _ticksSinceEntry fallback triggers at 40
+        PolicyDecision result = default;
+        for (int i = 0; i < 40; i++)
+            result = PolicyEngine.Decide(state, currentTickIndex: i, currentPrice: 42100);
         Assert.Equal("exit", result.Action);
         Assert.Equal("time_stop", result.Reason);
     }
