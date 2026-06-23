@@ -391,7 +391,7 @@ public static class PolicyEngine
         DiagHoldTimes.Clear();
         DiagDataSource = "";
         DiagCandleCount = 0;
-        ProtoDiag = new PrototypeDiagnostics();
+        // NOTE: ProtoDiag is NOT reset here — it accumulates across all days
     }
 
     public static void RecordPatternSimilarity(double sim)
