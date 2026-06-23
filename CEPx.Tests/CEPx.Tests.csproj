@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.Reactive.Testing" Version="6.1.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
@@ -22,6 +23,7 @@
     <ProjectReference Include="..\CEPx.Core\CEPx.Core.csproj" />
     <ProjectReference Include="..\CEPx.Pipeline\CEPx.Pipeline.csproj" />
     <ProjectReference Include="..\CEPx.Scoring\CEPx.Scoring.csproj" />
+    <ProjectReference Include="..\CEPx.EventGrammar\CEPx.EventGrammar.csproj" />
   </ItemGroup>
 
 </Project>
