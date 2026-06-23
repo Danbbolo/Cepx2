@@ -33,7 +33,7 @@ public class ScoringConfig
     public double TrendContinuationWeight { get; set; } = 0.20;
     public double BOSWeight { get; set; } = 0.15;
     public double CHoCHWeight { get; set; } = 0.25;
-    public double MetaWeight { get; set; } = 0.05; // reduced from 0.15 — meta was over-filtering
+    public double MetaWeight { get; set; } = 0.10; // tuned: 0.15 over-filtered, 0.05 under-filtered
 
     /// <summary>Bonus added to ReversalConviction when ≥ 2 reversal structures are active.</summary>
     public double ComboBonus { get; set; } = 0.15;
