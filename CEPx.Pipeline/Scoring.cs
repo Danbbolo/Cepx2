@@ -138,13 +138,31 @@ public static partial class PipelineFunctions
 
         if (window.Length >= 10)
         {
-            // DTW hard cap: candidate always 10 ticks, well within 50 limit
+            // Extract 10 ticks centered on the event timestamp
             double[] candidate = new double[10];
             int start = window.Length - 10;
+            long eventTs = evt.Timestamp;
+
+            // Find the tick closest to the event timestamp
+            int centerIdx = start;
+            long bestDiff = long.MaxValue;
+            for (int i = start; i < window.Length; i++)
+            {
+                long diff = Math.Abs(window[i].Timestamp - eventTs);
+                if (diff < bestDiff) { bestDiff = diff; centerIdx = i; }
+            }
+
+            // Extract 10 ticks: 5 before center, center, 4 after
+            int w0 = Math.Max(0, centerIdx - 5);
+            int w1 = Math.Min(window.Length - 1, w0 + 9);
+            w0 = Math.Max(0, w1 - 9); // ensure exactly 10 if possible
+            for (int i = 0; i < 10; i++)
+                candidate[i] = window[w0 + i].Price;
+
+            // Min-max normalize
             double cMin = double.MaxValue, cMax = double.MinValue;
             for (int i = 0; i < 10; i++)
             {
-                candidate[i] = window[start + i].Price;
                 if (candidate[i] < cMin) cMin = candidate[i];
                 if (candidate[i] > cMax) cMax = candidate[i];
             }
@@ -152,9 +170,8 @@ public static partial class PipelineFunctions
             double cRange = cMax - cMin;
             if (cRange == 0)
                 return new StructuralScore(score.Timestamp, score.Symbol, score.StateMean, score.StateVelocity, score.UncertaintyUpper, score.UncertaintyLower, score.PatternFamily, 0.0, 0.0, score.AnomalyScore);
-            if (cRange > 0)
-                for (int i = 0; i < 10; i++)
-                    candidate[i] = (candidate[i] - cMin) / cRange;
+            for (int i = 0; i < 10; i++)
+                candidate[i] = (candidate[i] - cMin) / cRange;
 
             // Continuation DTW
             double[] contProto = new double[10];
