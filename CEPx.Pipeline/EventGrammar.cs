@@ -88,30 +88,60 @@ public static partial class PipelineFunctions
         return null;
     }
 
+    /// <summary>
+    /// Detects exhaustion: a directional impulse followed by deceleration or reversal.
+    /// Scans all adjacent tick-pairs in the window for the strongest exhaustion pattern.
+    /// </summary>
     public static CepEvent? DetectExhaustionPulse(MarketEvent[] window)
     {
-        if (window.Length < 6) return null;
-        int l = window.Length;
-        double p0 = window[l - 6].Price;
-        double p2 = window[l - 4].Price;
-        double p3 = window[l - 3].Price;
-        double p5 = window[l - 1].Price;
-        double firstMove = p2 - p0;
-        double secondMove = p5 - p3;
-        double firstMovePct = Math.Abs(firstMove) / p0 * 100;
-        if (firstMovePct < 0.3) return null;
-        if (firstMove * secondMove > 0) return null;
-        if (Math.Abs(secondMove) < Math.Abs(firstMove) * 0.5) return null;
+        if (window.Length < 4) return null;
+        int n = window.Length;
 
-        // ── Score: move magnitude (40%) + reversal strength (60%) ──
-        double magScore = Clamp01(firstMovePct / 1.0);    // 0.3%→0.3, 1.0%+→1.0
-        double revRatio = Math.Abs(secondMove) / Math.Abs(firstMove); // 0.5 min, 1.0 max
-        double revScore = Clamp01((revRatio - 0.5) / 0.5); // 0.5→0.0, 0.75→0.5, 1.0→1.0
-        double score = magScore * 0.40 + revScore * 0.60;
+        // Scan all consecutive tick pairs for exhaustion pattern:
+        // firstHalf = price change over first N ticks, secondHalf = change over next M ticks
+        // Exhaustion = firstHalf is directional, secondHalf is flat or reversing
+        double bestScore = 0;
+        int bestIdx = 0;
+        bool bestReversed = false;
+        double bestFirstMovePct = 0, bestRevRatio = 0;
 
-        var ctx = firstMove > 0 ? "bullish_exhaustion" : "bearish_exhaustion";
-        string context = $"{ctx}:score:{score:F2}";
-        return new CepEvent(window[l - 1].Timestamp, window[l - 1].Symbol, "ExhaustionPulse", p5, context);
+        for (int start = 0; start <= n - 4; start++)
+        {
+            int mid = start + 2;
+            double pStart = window[start].Price;
+            double pMid = window[mid].Price;
+            double pEnd = window[Math.Min(mid + 2, n - 1)].Price;
+
+            double firstMove = pMid - pStart;
+            double secondMove = pEnd - pMid;
+            double firstMovePct = Math.Abs(firstMove) / pStart * 100;
+
+            if (firstMovePct < 0.15) continue;
+
+            bool reversed = firstMove * secondMove <= 0;
+            double revRatio = Math.Abs(secondMove) / Math.Max(Math.Abs(firstMove), 1e-10);
+
+            // Must either reverse direction or decelerate to < 25%
+            if (!reversed && revRatio >= 0.25) continue;
+            if (reversed && revRatio < 0.2) continue;
+
+            double magScore = Clamp01(firstMovePct / 0.4);
+            double revScore;
+            if (reversed)
+                revScore = Clamp01((revRatio - 0.2) / 0.8);
+            else
+                revScore = Clamp01((0.25 - revRatio) / 0.25);
+
+            double score = magScore * 0.40 + revScore * 0.60;
+            if (score > bestScore) { bestScore = score; bestIdx = mid; bestReversed = reversed; bestFirstMovePct = firstMovePct; bestRevRatio = revRatio; }
+        }
+
+        if (bestScore <= 0 || bestScore < 0.5) return null; // minimum score gate
+
+        var last = window[n - 1];
+        var ctx = bestReversed ? "reversal_exhaustion" : "deceleration_exhaustion";
+        string context = $"{ctx}:score:{bestScore:F2}";
+        return new CepEvent(last.Timestamp, last.Symbol, "ExhaustionPulse", last.Price, context);
     }
 
     private static double Clamp01(double value) => Math.Max(0.0, Math.Min(1.0, value));

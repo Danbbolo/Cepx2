@@ -25,16 +25,16 @@ public class EventGrammarConfig
     public int BreakoutRangeWindow { get; set; } = 10;
 
     // ── Exhaustion ───────────────────────────────────────────────
-    public double ExhaustionMovePct { get; set; } = 0.3;
-    public double ExhaustionReversalRatio { get; set; } = 0.5;
+    public double ExhaustionMovePct { get; set; } = 0.15;
+    public double ExhaustionReversalRatio { get; set; } = 0.3;
     public int ExhaustionWindow { get; set; } = 6;
-    public double ExhaustionStallRatio { get; set; } = 0.3;
+    public double ExhaustionStallRatio { get; set; } = 0.5;
 
     /// <summary>Stall ratio normalization: this ratio = score 1.0 for deceleration (lower = stronger).</summary>
-    public double ExhaustionStallNorm { get; set; } = 0.1;
+    public double ExhaustionStallNorm { get; set; } = 0.15;
 
     /// <summary>Initial move normalization: this % move = score 1.0 for magnitude.</summary>
-    public double ExhaustionMoveNormPct { get; set; } = 1.0;
+    public double ExhaustionMoveNormPct { get; set; } = 0.5;
 
     // ── Liquidation cluster detection ────────────────────────────
     /// <summary>Minimum number of liquidations against sweep direction to trigger.</summary>
@@ -76,11 +76,14 @@ public class EventGrammarConfig
     public int NoAbsorptionWindowTicks { get; set; } = 5;
 
     /// <summary>Volume multiplier ceiling: any tick above this ratio vs average = potential absorption.</summary>
-    public double NoAbsorptionMaxVolumeMultiplier { get; set; } = 2.0;
+    public double NoAbsorptionMaxVolumeMultiplier { get; set; } = 2.5;
 
-    /// <summary>Minimum net price move (% of price) required to trigger.</summary>
-    public double NoAbsorptionMinNetMovePct { get; set; } = 0.1;
+    /// <summary>Minimum net price move (% of price) required to trigger (tightened: was 0.1).</summary>
+    public double NoAbsorptionMinNetMovePct { get; set; } = 0.2;
 
-    /// <summary>Maximum price stall as fraction of net move (0.05 = 5% of the move can be stall).</summary>
-    public double NoAbsorptionPriceStallMax { get; set; } = 0.05;
+    /// <summary>Minimum score to fire (0.0-1.0). Filters out weak signals. Set to 0 to disable.</summary>
+    public double NoAbsorptionMinScore { get; set; } = 0.5;
+
+    /// <summary>Net move normalization: this % move = score 1.0 for continuation dimension.</summary>
+    public double NoAbsorptionMoveNormPct { get; set; } = 0.4;
 }

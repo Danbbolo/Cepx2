@@ -6,8 +6,8 @@ using CEPx.EventGrammar;
 
 // ── Multi-day test dates (add/remove as needed) ──
 var testDates = new[] {
-    (2026, 6, 18), (2026, 6, 19), (2026, 6, 20),
-    (2026, 6, 21), (2026, 6, 22)
+    (2026, 6, 16), (2026, 6, 17), (2026, 6, 18),
+    (2026, 6, 19), (2026, 6, 20), (2026, 6, 21), (2026, 6, 22)
 };
 
 var allResults = new List<DayResult>();
@@ -49,7 +49,14 @@ double avgPnlPerDay = allResults.Count > 0 ? totalPnl / allResults.Count : 0;
 Console.WriteLine($"{"TOTAL",-12} {totalTrades,7} {avgWin,5:F0}% {totalPnl,7:F2}% {totalModeA,6} {totalModeB,6} {totalMom,4} {totalVel,4} {totalRev,4}");
 Console.WriteLine($"\nAvg PnL/day: {avgPnlPerDay:F2}% | Win rate: {avgWin:F0}%");
 Console.WriteLine($"Modes: mode_a={totalModeA} | mode_b={totalModeB}");
+Console.WriteLine($"Mode A with cont signal: {PolicyEngine.ModeAWithContSignal}/{totalModeA}");
+Console.WriteLine($"Mode B with rev signal: {PolicyEngine.ModeBWithRevSignal}/{totalModeB}");
 Console.WriteLine($"Exits: momentum_decay={totalMom} velocity_flip={totalVel} reversal_signal={totalRev} other={totalOther}");
+
+// ── Signal activity summary ──
+Console.WriteLine($"\nSignal activity:");
+Console.WriteLine($"  Reversal: Absorption={PolicyEngine.AbsorptionCount} Exhaustion={PolicyEngine.ExhaustionCount} Reclaim={PolicyEngine.ReclaimCount} LiqCluster={PolicyEngine.LiquidationClusterCount}");
+Console.WriteLine($"  Continuation: MomentumPersistence={PolicyEngine.MomentumPersistenceCount} NoAbsorption={PolicyEngine.NoAbsorptionCount}");
 
 // ── Day runner ──
 static DayResult RunDay(int year, int month, int day)
@@ -60,10 +67,16 @@ static DayResult RunDay(int year, int month, int day)
     var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, startMs: startUTC, endMs: endUTC);
     if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
+    // CHD_SPIKE: use CHD CSV if path provided via env var (remove after full integration)
+    var chdCsvPath = Environment.GetEnvironmentVariable("CHD_CSV_PATH");
+    if (!string.IsNullOrEmpty(chdCsvPath) && File.Exists(chdCsvPath))
+        ticks = PipelineFunctions.FetchChdCsv(chdCsvPath);
+    // END CHD_SPIKE
+
     // Fetch liquidations for the same time window
     // DEBUG_LIQ: Temporary logging to assess liquidation data quality. Remove after analysis.
     LiquidationEvent[] liquidations;
-    try { liquidations = PipelineFunctions.FetchLiquidations("BTCUSDT", 1000, startMs: startUTC, endMs: endUTC); }
+    try { liquidations = PipelineFunctions.FetchLiquidations("BTCUSDT", 100, startMs: startUTC, endMs: endUTC); }
     catch (Exception ex) { Console.WriteLine($"[DEBUG_LIQ] Fetch failed: {ex.Message}"); liquidations = Array.Empty<LiquidationEvent>(); }
 
     // DEBUG_LIQ: Per-day summary
@@ -107,6 +120,26 @@ static DayResult RunDay(int year, int month, int day)
                 w10, liquidations, pendingSweepOrigin, pendingSweepIsBullish,
                 ticks[i].Timestamp - 600_000, ticks[i].Timestamp);
             if (liqCluster != null) PolicyEngine.RecordEvent(liqCluster.Value);
+
+            // Continuation detectors: record BEFORE re-evaluation so they're active for Decide
+            var momPer = MomentumPersistenceDetector.Detect(w10, 0.0);
+            if (momPer != null) PolicyEngine.RecordEvent(momPer.Value);
+            var noAbs = NoMeaningfulAbsorptionDetector.Detect(w10);
+            if (noAbs != null) PolicyEngine.RecordEvent(noAbs.Value);
+
+            // ── Strong reversal signal → re-evaluate with current window ──
+            if (exhaustion != null || liqCluster != null)
+            {
+                var freshState = ScoringEngine.RefreshState(w10, pendingSweepIsBullish);
+                var reDecision = PolicyEngine.Decide(freshState, i, ticks[i].Price,
+                    pendingSweepOrigin, pendingSweepIsBullish);
+                if (reDecision.Action == "enter")
+                {
+                    PolicyEngine.PaperExecute(reDecision, ticks[i].Price, "sweep",
+                        freshState.PatternSimilarity, freshState.KalmanVelocity, i,
+                        pendingSweepOrigin, pendingSweepIsBullish);
+                }
+            }
         }
 
         // ── Exit check when in position ──

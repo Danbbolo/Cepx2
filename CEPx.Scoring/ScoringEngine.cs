@@ -240,4 +240,18 @@ public static class ScoringEngine
             "hold"
         );
     }
+
+    /// <summary>
+    /// Produce a fresh BlackboardState from the current window for post-sweep re-evaluation.
+    /// Uses a synthetic sweep event anchored at the last tick of the window so that
+    /// ScoreEvent extracts the window correctly and SweepActive remains true.
+    /// </summary>
+    public static BlackboardState RefreshState(MarketEvent[] window, bool isBullishSweep)
+    {
+        var last = window[window.Length - 1];
+        var synth = new CepEvent(last.Timestamp, last.Symbol, "SweepStart",
+            last.Price, isBullishSweep ? "bullish" : "bearish");
+        var score = ScoreEvent(synth, window);
+        return WriteState(score, window);
+    }
 }

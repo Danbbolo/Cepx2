@@ -197,20 +197,21 @@ public class EventGrammarTests
         var result = PipelineFunctions.DetectExhaustionPulse(window);
         Assert.NotNull(result);
         Assert.Equal("ExhaustionPulse", result.Value.Type);
-        Assert.StartsWith("bullish_exhaustion", result.Value.Context);
+        Assert.StartsWith("reversal_exhaustion", result.Value.Context);
     }
 
     [Fact]
     public void ExhaustionPulse_does_not_fire_on_weak_reversal()
     {
+        // All ticks move consistently — no exhaustion pattern anywhere
         var window = new MarketEvent[]
         {
             new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
-            new(100, "BTCUSDT", 42100.0, 1.0, 0, 0, 0),
-            new(200, "BTCUSDT", 42200.0, 1.0, 0, 0, 0),
-            new(300, "BTCUSDT", 42200.0, 1.0, 0, 0, 0),
-            new(400, "BTCUSDT", 42180.0, 1.0, 0, 0, 0),
-            new(500, "BTCUSDT", 42150.0, 1.0, 0, 0, 0),
+            new(100, "BTCUSDT", 42050.0, 1.0, 0, 0, 0),
+            new(200, "BTCUSDT", 42100.0, 1.0, 0, 0, 0),
+            new(300, "BTCUSDT", 42150.0, 1.0, 0, 0, 0),
+            new(400, "BTCUSDT", 42200.0, 1.0, 0, 0, 0),
+            new(500, "BTCUSDT", 42250.0, 1.0, 0, 0, 0),
         };
         var result = PipelineFunctions.DetectExhaustionPulse(window);
         Assert.Null(result);

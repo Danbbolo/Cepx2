@@ -210,53 +210,121 @@ public static partial class PipelineFunctions
         return result.ToArray();
     }
 
+    // CHD_SPIKE: read CHD 1m resampled CSV into MarketEvent[] (remove after full integration)
+    public static MarketEvent[] FetchChdCsv(string path, string symbol = "BTCUSDT")
+    {
+        var result = new List<MarketEvent>();
+        int seq = 0;
+        foreach (var line in File.ReadLines(path).Skip(1)) // skip header
+        {
+            var cols = line.Split(',');
+            if (cols.Length < 8) continue;
+            long ts = long.Parse(cols[8]); // ts_ms (last column)
+            double close = double.Parse(cols[4], System.Globalization.CultureInfo.InvariantCulture);
+            double volume = double.Parse(cols[5], System.Globalization.CultureInfo.InvariantCulture);
+            double buyVol = double.Parse(cols[6], System.Globalization.CultureInfo.InvariantCulture);
+            double sellVol = double.Parse(cols[7], System.Globalization.CultureInfo.InvariantCulture);
+            result.Add(new MarketEvent(ts, symbol, close, volume, buyVol, sellVol, seq++));
+        }
+        Console.WriteLine($"[CHD_SPIKE] Loaded {result.Count} bars from {path}");
+        return result.ToArray();
+    }
+    // END CHD_SPIKE
+
     /// <summary>Fetch liquidation orders from Binance Futures.</summary>
-    // DEBUG_LIQ: Temporary logging to assess liquidation data quality. Remove after analysis.
+    /// <remarks>
+    /// Uses authenticated endpoint /fapi/v1/forceOrders with HMAC-SHA256 signing.
+    /// Requires both BinanceApiKey and BinanceApiSecret.
+    /// DEBUG_LIQ: Temporary logging — remove after data quality confirmed.
+    /// </remarks>
     public static LiquidationEvent[] FetchLiquidations(string symbol = "BTCUSDT", int limit = 1000, long startMs = 0, long endMs = 0)
     {
         using var http = new HttpClient();
-        var url = $"https://fapi.binance.com/fapi/v1/allForceOrders?symbol={symbol}&limit={limit}";
-        if (startMs > 0) url += $"&startTime={startMs}";
-        if (endMs > 0) url += $"&endTime={endMs}";
 
         // DEBUG_LIQ: Log the request
         var startDt = DateTimeOffset.FromUnixTimeMilliseconds(startMs).UtcDateTime;
         var endDt = DateTimeOffset.FromUnixTimeMilliseconds(endMs).UtcDateTime;
-        Console.WriteLine($"[DEBUG_LIQ] Fetching liquidations: {startDt:yyyy-MM-dd HH:mm} → {endDt:yyyy-MM-dd HH:mm}");
+        Console.WriteLine($"[DEBUG_LIQ] Fetching liquidations: {startDt:yyyy-MM-dd HH:mm} -> {endDt:yyyy-MM-dd HH:mm}");
 
-        var json = http.GetStringAsync(url).Result;
-        using var doc = JsonDocument.Parse(json);
-        var rows = doc.RootElement.EnumerateArray();
-        var result = new List<LiquidationEvent>();
-
-        foreach (var row in rows)
+        if (string.IsNullOrEmpty(PipelineFunctions.BinanceApiKey) || string.IsNullOrEmpty(PipelineFunctions.BinanceApiSecret))
         {
-            long ts = row.GetProperty("time").GetInt64();
-            string sym = row.GetProperty("symbol").GetString()!;
-            double price = double.Parse(row.GetProperty("price").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
-            double qty = double.Parse(row.GetProperty("origQty").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
-            string side = row.GetProperty("side").GetString()!;
-            string type = row.GetProperty("type").GetString()!;
-            result.Add(new LiquidationEvent(ts, sym, price, qty, side, type));
+            Console.WriteLine("[DEBUG_LIQ] BINANCE_API_KEY and BINANCE_API_SECRET required for liquidation fetch. Skipping.");
+            return Array.Empty<LiquidationEvent>();
         }
 
-        // DEBUG_LIQ: Log summary stats
-        int longLiqs = result.Count(l => l.IsLongLiquidation);
-        int shortLiqs = result.Count(l => l.IsShortLiquidation);
-        double totalLongQty = result.Where(l => l.IsLongLiquidation).Sum(l => l.Quantity);
-        double totalShortQty = result.Where(l => l.IsShortLiquidation).Sum(l => l.Quantity);
-        Console.WriteLine($"[DEBUG_LIQ] Received {result.Count} liquidations | Long: {longLiqs} ({totalLongQty:F1} qty) | Short: {shortLiqs} ({totalShortQty:F1} qty)");
-
-        // DEBUG_LIQ: Print first 5 as sample
-        for (int i = 0; i < Math.Min(5, result.Count); i++)
+        try
         {
-            var l = result[i];
-            var ldt = DateTimeOffset.FromUnixTimeMilliseconds(l.Timestamp).UtcDateTime;
-            Console.WriteLine($"[DEBUG_LIQ]   #{i+1} {ldt:HH:mm:ss} {l.Side} {l.Price:F2} qty={l.Quantity:F1} type={l.Type}");
-        }
-        if (result.Count > 5) Console.WriteLine($"[DEBUG_LIQ]   ... and {result.Count - 5} more");
-        // END DEBUG_LIQ
+            // Build query string with timestamp for signing
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            int safeLimit = Math.Min(limit, 100); // forceOrders max is 100
+            var queryParams = $"symbol={symbol}&limit={safeLimit}&timestamp={timestamp}";
+            if (startMs > 0) queryParams += $"&startTime={startMs}";
+            if (endMs > 0) queryParams += $"&endTime={endMs}";
 
-        return result.ToArray();
+            // HMAC-SHA256 signature
+            var signature = SignQuery(queryParams, PipelineFunctions.BinanceApiSecret);
+            var url = $"https://fapi.binance.com/fapi/v1/forceOrders?{queryParams}&signature={signature}";
+
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("X-MBX-APIKEY", PipelineFunctions.BinanceApiKey);
+
+            var response = http.Send(request);
+            var body = response.Content.ReadAsStringAsync().Result;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[DEBUG_LIQ] HTTP {response.StatusCode}: {body}");
+                return Array.Empty<LiquidationEvent>();
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var rows = doc.RootElement.EnumerateArray();
+            var result = new List<LiquidationEvent>();
+
+            foreach (var row in rows)
+            {
+                long ts = row.GetProperty("time").GetInt64();
+                string sym = row.GetProperty("symbol").GetString()!;
+                double price = double.Parse(row.GetProperty("price").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+                double qty = double.Parse(row.GetProperty("origQty").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+                string side = row.GetProperty("side").GetString()!;
+                string type = row.GetProperty("type").GetString()!;
+                result.Add(new LiquidationEvent(ts, sym, price, qty, side, type));
+            }
+
+            // DEBUG_LIQ: Log summary stats
+            int longLiqs = result.Count(l => l.IsLongLiquidation);
+            int shortLiqs = result.Count(l => l.IsShortLiquidation);
+            double totalLongQty = result.Where(l => l.IsLongLiquidation).Sum(l => l.Quantity);
+            double totalShortQty = result.Where(l => l.IsShortLiquidation).Sum(l => l.Quantity);
+            Console.WriteLine($"[DEBUG_LIQ] Received {result.Count} liquidations | Long: {longLiqs} ({totalLongQty:F1} qty) | Short: {shortLiqs} ({totalShortQty:F1} qty)");
+
+            // DEBUG_LIQ: Print first 5 as sample
+            for (int i = 0; i < Math.Min(5, result.Count); i++)
+            {
+                var l = result[i];
+                var ldt = DateTimeOffset.FromUnixTimeMilliseconds(l.Timestamp).UtcDateTime;
+                Console.WriteLine($"[DEBUG_LIQ]   #{i + 1} {ldt:HH:mm:ss} {l.Side} {l.Price:F2} qty={l.Quantity:F1} type={l.Type}");
+            }
+            if (result.Count > 5) Console.WriteLine($"[DEBUG_LIQ]   ... and {result.Count - 5} more");
+            // END DEBUG_LIQ
+
+            return result.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DEBUG_LIQ] Fetch failed: {ex.Message}");
+            if (ex.InnerException != null) Console.WriteLine($"[DEBUG_LIQ]   Inner: {ex.InnerException.Message}");
+            return Array.Empty<LiquidationEvent>();
+        }
+    }
+
+    /// <summary>HMAC-SHA256 sign a query string with the API secret.</summary>
+    private static string SignQuery(string query, string secret)
+    {
+        using var hmac = new System.Security.Cryptography.HMACSHA256(
+            System.Text.Encoding.UTF8.GetBytes(secret));
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(query));
+        return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 }

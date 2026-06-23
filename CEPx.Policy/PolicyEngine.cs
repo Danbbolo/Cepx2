@@ -34,11 +34,33 @@ public static class PolicyEngine
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const long MODE_B_MAX_SWEEP_AGE_MS = 480_000; // 8 minutes
     private const long EVENT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long event signals stay valid
-    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when generic event signals present (legacy flat boost)
-    private const double MODE_B_EVENT_BOOST_MIN = 0.03; // minimum gradient boost for absorption/exhaustion
-    private const double MODE_B_EVENT_BOOST_MAX = 0.12; // maximum gradient boost for absorption/exhaustion
-    private const double MODE_B_LIQ_COMBO_BOOST = 0.15; // base combo boost when liq cluster + companion both active
-    private const long LIQ_CLUSTER_TTL_MS = 300_000; // 5 minutes — liquidation clusters live longer than generic events
+    private const long LIQ_CLUSTER_TTL_MS = 300_000; // 5 minutes — liquidation clusters live longer
+
+    // ── Mode B reversal boost tiers (strongest → weakest, parallel to Mode A) ──
+    // Tier 1: liq cluster + any companion (combo)
+    private const double MODE_B_LIQ_COMBO_BASE = 0.18;
+    private const double MODE_B_LIQ_COMBO_EXTRA = 0.05; // if liq score >= 0.85
+    // Tier 2: exhaustion + liq companion (combo)
+    private const double MODE_B_EXH_COMBO_SCALE = 0.25;
+    private const double MODE_B_EXH_COMBO_MIN = 0.10;
+    private const double MODE_B_EXH_COMBO_MAX = 0.22;
+    // Tier 3: liq standalone
+    private const double MODE_B_LIQ_SOLO_SCALE = 0.25;
+    private const double MODE_B_LIQ_SOLO_MIN = 0.08;
+    private const double MODE_B_LIQ_SOLO_MAX = 0.20;
+    // Tier 4: exhaustion standalone
+    private const double MODE_B_EXH_SOLO_SCALE = 0.22;
+    private const double MODE_B_EXH_SOLO_MIN = 0.06;
+    private const double MODE_B_EXH_SOLO_MAX = 0.18;
+    // Tier 5: absorption/reclaim + liq companion (combo)
+    private const double MODE_B_EVT_COMBO_SCALE = 0.18;
+    private const double MODE_B_EVT_COMBO_MIN = 0.06;
+    private const double MODE_B_EVT_COMBO_MAX = 0.16;
+    private const double MODE_B_EVT_COMBO_FLAT = 0.03;
+    // Tier 6: absorption/reclaim standalone
+    private const double MODE_B_EVT_SOLO_SCALE = 0.14;
+    private const double MODE_B_EVT_SOLO_MIN = 0.03;
+    private const double MODE_B_EVT_SOLO_MAX = 0.12;
     private const long CONT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long continuation signals stay valid
 
     // ── Mode A continuation boost tiers (strongest → weakest) ────
@@ -75,6 +97,16 @@ public static class PolicyEngine
     public static int RevSigExits;
     public static int OtherExits;
 
+    // ── Signal activity counters (for diagnostics) ──────────────
+    public static int AbsorptionCount;
+    public static int ExhaustionCount;
+    public static int ReclaimCount;
+    public static int LiquidationClusterCount;
+    public static int MomentumPersistenceCount;
+    public static int NoAbsorptionCount;
+    public static int ModeAWithContSignal; // Mode A entries where a cont signal was active
+    public static int ModeBWithRevSignal;  // Mode B entries where a reversal signal gave a boost
+
     // ── Structural exit state ─────────────────────────────────────────
     private static readonly List<double> _patternSimHistory = new();
     private static double _sweepOriginPrice;
@@ -86,14 +118,18 @@ public static class PolicyEngine
     private static int _velocityFlipTicks; // tick fallback
     private static long _velocityFlipStartMs;
     private static long _lastSweepMs; // timestamp of last sweep
-    private static string _lastEventType = ""; // most recent EventGrammar signal (absorption/exhaustion/reclaim)
+    private static string _lastEventType = ""; // most recent EventGrammar signal (absorption/reclaim)
     private static long _lastEventTimestamp; // when it fired
-    private static double _lastEventScore; // 0.0–1.0 severity score for absorption/exhaustion
+    private static double _lastEventScore; // 0.0–1.0 severity score for absorption/reclaim
+    private static bool _eventHadLiqCompanion; // true if liq cluster was active when absorption/reclaim fired
+    private static string _lastExhaustionType = ""; // "ExhaustionPulse" or "ExhaustionAfterSweep" or ""
+    private static long _lastExhaustionTimestamp;
+    private static double _lastExhaustionScore;
+    private static bool _exhaustionHadLiqCompanion; // true if liq cluster was active when exhaustion fired
     private static string _lastLiqType = ""; // most recent liquidation cluster direction
     private static long _lastLiqTimestamp; // when the liquidation cluster fired
     private static double _liqClusterScore; // 0.0–1.0 severity score
     private static bool _liqHadCompanion; // true if absorption/exhaustion was also active when liq fired
-    private static bool _eventHadLiqCompanion; // true if liq cluster was active when absorption/exhaustion fired
 
     // ── Continuation signal state (tracked separately per type) ──
     private static string _lastMomPerType = ""; // "MomentumPersistence" or ""
@@ -125,6 +161,10 @@ public static class PolicyEngine
         _liqClusterScore = 0;
         _liqHadCompanion = false;
         _eventHadLiqCompanion = false;
+        _lastExhaustionType = "";
+        _lastExhaustionTimestamp = 0;
+        _lastExhaustionScore = 0;
+        _exhaustionHadLiqCompanion = false;
         _lastMomPerType = "";
         _lastMomPerTimestamp = 0;
         _lastMomPerScore = 0;
@@ -137,6 +177,14 @@ public static class PolicyEngine
         VelFlipExits = 0;
         RevSigExits = 0;
         OtherExits = 0;
+        AbsorptionCount = 0;
+        ExhaustionCount = 0;
+        ReclaimCount = 0;
+        LiquidationClusterCount = 0;
+        MomentumPersistenceCount = 0;
+        NoAbsorptionCount = 0;
+        ModeAWithContSignal = 0;
+        ModeBWithRevSignal = 0;
     }
 
     public static void RecordPatternSimilarity(double sim)
@@ -154,38 +202,57 @@ public static class PolicyEngine
     /// <summary>Feed EventGrammar signals into the BT for decision support.</summary>
     public static void RecordEvent(CepEvent evt)
     {
-        if (evt.Type == "AbsorptionAfterSweep" || evt.Type == "ExhaustionAfterSweep" || evt.Type == "Reclaim")
+        if (evt.Type == "AbsorptionAfterSweep")
         {
+            AbsorptionCount++;
             _lastEventType = evt.Type;
             _lastEventTimestamp = evt.Timestamp;
-
-            // Parse score from context: "score:0.72" or "bullish_exhaustion:score:0.65"
             _lastEventScore = ParseEventScore(evt.Context);
-
-            // Check if a liq cluster was recently active → bidirectional combo
+            _eventHadLiqCompanion = _lastLiqType != "" &&
+                evt.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
+        }
+        else if (evt.Type == "ExhaustionAfterSweep" || evt.Type == "ExhaustionPulse")
+        {
+            ExhaustionCount++;
+            _lastExhaustionType = evt.Type;
+            _lastExhaustionTimestamp = evt.Timestamp;
+            _lastExhaustionScore = ParseEventScore(evt.Context);
+            _exhaustionHadLiqCompanion = _lastLiqType != "" &&
+                evt.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
+        }
+        else if (evt.Type == "Reclaim")
+        {
+            ReclaimCount++;
+            _lastEventType = evt.Type;
+            _lastEventTimestamp = evt.Timestamp;
+            _lastEventScore = ParseEventScore(evt.Context);
             _eventHadLiqCompanion = _lastLiqType != "" &&
                 evt.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
         }
         else if (evt.Type == "LiquidationCluster")
         {
+            LiquidationClusterCount++;
             _lastLiqType = evt.Type;
             _lastLiqTimestamp = evt.Timestamp;
-
-            // Parse score from context: "longs_stopped:0.85:5:32.0"
             _liqClusterScore = ParseLiqScore(evt.Context);
 
-            // Check if a companion event (absorption/exhaustion) was recently active
-            _liqHadCompanion = _lastEventType != "" &&
+            // Check if any companion (absorption, reclaim, or exhaustion) was active
+            bool genericActive = _lastEventType != "" &&
                 evt.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
+            bool exhaustionActive = _lastExhaustionType != "" &&
+                evt.Timestamp - _lastExhaustionTimestamp <= EVENT_SIGNAL_TTL_MS;
+            _liqHadCompanion = genericActive || exhaustionActive;
         }
         else if (evt.Type == "MomentumPersistence")
         {
+            MomentumPersistenceCount++;
             _lastMomPerType = evt.Type;
             _lastMomPerTimestamp = evt.Timestamp;
             _lastMomPerScore = ParseEventScore(evt.Context);
         }
         else if (evt.Type == "NoMeaningfulAbsorption")
         {
+            NoAbsorptionCount++;
             _lastNoAbsType = evt.Type;
             _lastNoAbsTimestamp = evt.Timestamp;
             _lastNoAbsScore = ParseEventScore(evt.Context);
@@ -424,6 +491,7 @@ public static class PolicyEngine
 
             if (entryAllowed && velOk && rev < 0.5)
             {
+                if (anyContActive) ModeAWithContSignal++;
                 _entryStartMs = state.Timestamp;
                 string side = isBull ? "long" : "short";
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a", 1.0);
@@ -442,55 +510,78 @@ public static class PolicyEngine
             bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
 
             // ── EventGrammar boost for Mode B reversal threshold ──
-            // Three signal tiers with gradient scoring, ordered strongest→weakest:
-            //   1. Liq combo: liq cluster + absorption/exhaustion both active → biggest boost
-            //   2. Liq standalone: gradient boost = liqScore × 0.20, clamped [0.05, 0.15]
-            //   3. Event combo: absorption/exhaustion + liq active → stronger event boost
-            //   4. Event standalone: gradient boost = eventScore × 0.12, clamped [0.03, 0.12]
+            // 6-tier priority system (strongest → weakest), parallel to Mode A:
+            //   T1: Liq combo — liq cluster + any companion (absorption/reclaim/exhaustion)
+            //   T2: Exhaustion combo — exhaustion + liq active
+            //   T3: Liq standalone — liq cluster alone, gradient boost
+            //   T4: Exhaustion standalone — exhaustion alone, gradient boost
+            //   T5: Event combo — absorption/reclaim + liq companion
+            //   T6: Event standalone — absorption/reclaim alone, gradient boost
 
+            // Generic event (absorption/reclaim): tracked separately from exhaustion
             bool genericEventActive = _lastEventType != "" &&
                 state.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
+
+            // Exhaustion: tracked independently with its own score
+            bool exhaustionActive = _lastExhaustionType != "" &&
+                state.Timestamp - _lastExhaustionTimestamp <= EVENT_SIGNAL_TTL_MS;
 
             bool liqActive = _lastLiqType != "" &&
                 state.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
 
-            // Combo: liquidation cluster + companion → strongest signal
+            // Combos: bidirectional detection
             bool liqComboActive = liqActive && _liqHadCompanion &&
-                state.Timestamp - _lastEventTimestamp <= LIQ_CLUSTER_TTL_MS;
-
-            // Combo: absorption/exhaustion + liq cluster active → stronger event boost
-            bool eventComboActive = genericEventActive && _eventHadLiqCompanion &&
-                state.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
+                (genericEventActive || exhaustionActive);
+            bool exhaustionComboActive = exhaustionActive && _exhaustionHadLiqCompanion && liqActive;
+            bool eventComboActive = genericEventActive && _eventHadLiqCompanion && liqActive;
 
             double effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD;
 
             if (liqComboActive)
             {
-                // Liq combo: base 0.15 + up to 0.05 extra for high-score clusters
-                double comboExtra = _liqClusterScore >= 0.85 ? 0.05 : 0.0;
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_COMBO_BOOST - comboExtra;
+                // T1: liq + companion — base 0.18 + up to 0.05 extra for high-score clusters
+                double comboExtra = _liqClusterScore >= 0.85 ? MODE_B_LIQ_COMBO_EXTRA : 0.0;
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_COMBO_BASE - comboExtra;
+            }
+            else if (exhaustionComboActive)
+            {
+                // T2: exhaustion + liq active — combo bonus on top of exhaustion score
+                double boost = Clamp(_lastExhaustionScore * MODE_B_EXH_COMBO_SCALE,
+                    MODE_B_EXH_COMBO_MIN, MODE_B_EXH_COMBO_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - boost;
             }
             else if (liqActive)
             {
-                // Gradient boost: score 0.5→0.10, 0.7→0.14, 0.85→0.17, 1.0→0.20
-                double gradientBoost = Clamp(_liqClusterScore * 0.20, 0.05, 0.15);
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost;
+                // T3: liq standalone — score 0.5→0.13, 0.7→0.18, 1.0→0.25
+                double boost = Clamp(_liqClusterScore * MODE_B_LIQ_SOLO_SCALE,
+                    MODE_B_LIQ_SOLO_MIN, MODE_B_LIQ_SOLO_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - boost;
+            }
+            else if (exhaustionActive)
+            {
+                // T4: exhaustion standalone — score 0.4→0.09, 0.6→0.13, 0.8→0.18
+                double boost = Clamp(_lastExhaustionScore * MODE_B_EXH_SOLO_SCALE,
+                    MODE_B_EXH_SOLO_MIN, MODE_B_EXH_SOLO_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - boost;
             }
             else if (eventComboActive)
             {
-                // Event combo: base gradient + combo bonus of 0.04
-                double gradientBoost = Clamp(_lastEventScore * 0.12, MODE_B_EVENT_BOOST_MIN, MODE_B_EVENT_BOOST_MAX);
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost - 0.04;
+                // T5: absorption/reclaim + liq companion
+                double boost = Clamp(_lastEventScore * MODE_B_EVT_COMBO_SCALE,
+                    MODE_B_EVT_COMBO_MIN, MODE_B_EVT_COMBO_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - boost - MODE_B_EVT_COMBO_FLAT;
             }
             else if (genericEventActive)
             {
-                // Gradient boost: score 0.3→0.04, 0.5→0.06, 0.7→0.08, 1.0→0.12
-                double gradientBoost = Clamp(_lastEventScore * 0.12, MODE_B_EVENT_BOOST_MIN, MODE_B_EVENT_BOOST_MAX);
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost;
+                // T6: absorption/reclaim standalone — score 0.3→0.04, 0.5→0.07, 0.8→0.11
+                double boost = Clamp(_lastEventScore * MODE_B_EVT_SOLO_SCALE,
+                    MODE_B_EVT_SOLO_MIN, MODE_B_EVT_SOLO_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - boost;
             }
 
             if (rev >= effectiveRevThreshold && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {
+                if (effectiveRevThreshold < MODE_B_REVERSAL_THRESHOLD) ModeBWithRevSignal++;
                 _entryStartMs = state.Timestamp;
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);

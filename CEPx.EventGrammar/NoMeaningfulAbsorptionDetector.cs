@@ -86,8 +86,8 @@ public class NoMeaningfulAbsorptionDetector
         // ── Scoring ──────────────────────────────────────────────
 
         // A. Price continuation: how much did price move?
-        // 0.1%→0.25, 0.2%→0.5, 0.4%+→1.0
-        double continuationScore = Clamp01(netMovePct / 0.4);
+        double moveNorm = cfg.NoAbsorptionMoveNormPct;
+        double continuationScore = Clamp01(netMovePct / moveNorm);
 
         // B. Volume containment: how far below the absorption threshold?
         // volRatio at 1.0 (avg) → 1.0, at threshold → 0.0
@@ -101,6 +101,9 @@ public class NoMeaningfulAbsorptionDetector
         // Weights: continuation 50%, containment 30%, smoothness 20%
         double score = Clamp01(
             continuationScore * 0.50 + containmentScore * 0.30 + smoothnessScore * 0.20);
+
+        // ── Minimum score gate: discard weak signals ─────────────
+        if (score < cfg.NoAbsorptionMinScore) return null;
 
         string dir = isUp ? "up" : "down";
         string context = $"score:{score:F2}:dir={dir}:volRatio={volRatio:F1}:move={netMovePct:F2}%";
