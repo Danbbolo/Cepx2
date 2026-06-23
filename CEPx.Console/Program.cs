@@ -99,13 +99,13 @@ static DayResult RunDay(int year, int month, int day)
     Console.WriteLine($"[DEBUG_LIQ] Day summary: {liquidations.Length} total | long={liqLongCount} short={liqShortCount} | avgQty={liqAvgQty:F1} maxQty={liqMaxQty:F1}");
     // END DEBUG_LIQ
 
-    // ── Compute daily average volume (first 100 candles, for LowLiquidityReject) ──
-    double dailyAvgVolume = 0;
-    if (ticks.Length > 0)
-    {
-        int volSample = Math.Min(100, ticks.Length);
-        dailyAvgVolume = ticks.Take(volSample).Average(t => t.Volume);
-    }
+    // ── Foundation trackers (Phase A) ─────────────────────────────
+    var swingTracker = new SwingTracker();
+    var volTracker = new VolumeContextTracker();
+    // Warm up volume tracker from first candles
+    foreach (var t in ticks.Take(Math.Min(100, ticks.Length)))
+        volTracker.Update(t.Volume);
+    // END PHASE A
 
     Console.WriteLine($"\n=== {dateLabel} — {ticks.Length} candles ===");
 
@@ -128,6 +128,11 @@ static DayResult RunDay(int year, int month, int day)
     {
         buf[i % 10] = ticks[i];
         long nowMs = ticks[i].Timestamp;
+
+        // ── Foundation trackers: update every tick ──────────────────
+        swingTracker.Update(ticks[i].Price, ticks[i].Timestamp);
+        volTracker.Update(ticks[i].Volume);
+        // END PHASE A
 
         // ── Post-sweep detectors: time-based window after sweep ──
         if (nowMs <= postSweepEndMs && i >= 9)
@@ -161,7 +166,7 @@ static DayResult RunDay(int year, int month, int day)
                 // Build ActiveEventSnapshot from current TTL state
                 var snapshot = PolicyEngine.SnapshotActiveEvents(
                     ticks[i].Timestamp, pendingSweepOrigin, pendingSweepIsBullish,
-                    0, dailyAvgVolume);
+                    0, volTracker.DailyAvgVolume);
                 var freshState = ScoringEngine.RefreshState(w10, snapshot);
                 PolicyEngine.UpdateCandidate(freshState,
                     exhaustion != null, absorption != null, reclaim != null,
@@ -188,7 +193,7 @@ static DayResult RunDay(int year, int month, int day)
             for (int j = 0; j < 10; j++) w10[j] = buf[(i - 9 + j) % 10];
             // Use market-structure scoring with empty event snapshot for exit
             var exitSnapshot = new ActiveEventSnapshot(
-                PolicyEngine.EntryPrice, PolicyEngine.PositionSide == "long", 0, dailyAvgVolume);
+                PolicyEngine.EntryPrice, PolicyEngine.PositionSide == "long", 0, volTracker.DailyAvgVolume);
             var exitScore = ScoringEngine.ScoreMarket(w10, exitSnapshot);
             var exitState = ScoringEngine.WriteState(exitScore, w10);
             PolicyEngine.RecordPatternSimilarity(exitState.PatternSimilarity);
@@ -214,7 +219,7 @@ static DayResult RunDay(int year, int month, int day)
         for (int j = 0; j < 10; j++) scoreW10[j] = buf[(i - 9 + j) % 10];
         // Use market-structure scoring with empty event snapshot (sweep just detected)
         var initSnapshot = new ActiveEventSnapshot(
-            pendingSweepOrigin, pendingSweepIsBullish, 0, dailyAvgVolume);
+            pendingSweepOrigin, pendingSweepIsBullish, 0, volTracker.DailyAvgVolume);
         var score = ScoringEngine.ScoreMarket(scoreW10, initSnapshot);
         var state = ScoringEngine.WriteState(score, scoreW10);
 
