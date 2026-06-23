@@ -142,24 +142,14 @@ static DayResult RunDay(int year, int month, int day)
             var noAbs = NoMeaningfulAbsorptionDetector.Detect(w10);
             if (noAbs != null) PolicyEngine.RecordEvent(noAbs.Value);
 
-            // ── Strong reversal signal → re-evaluate with current window ──
+            // ── Any reversal signal → update candidate evidence only ──
             if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
             {
                 PolicyEngine.DiagReEvalAttempts++;
                 var freshState = ScoringEngine.RefreshState(w10, pendingSweepIsBullish);
-                // Update candidate with fresh state + signal flags
                 PolicyEngine.UpdateCandidate(freshState,
                     exhaustion != null, absorption != null, reclaim != null,
                     momPer != null, noAbs != null);
-                var reDecision = PolicyEngine.Decide(freshState, i, ticks[i].Price,
-                    pendingSweepOrigin, pendingSweepIsBullish);
-                if (reDecision.Action == "enter")
-                {
-                    PolicyEngine.DiagReEvalEntries++;
-                    PolicyEngine.PaperExecute(reDecision, ticks[i].Price, "sweep",
-                        freshState.PatternSimilarity, freshState.KalmanVelocity, i,
-                        pendingSweepOrigin, pendingSweepIsBullish);
-                }
             }
         }
 

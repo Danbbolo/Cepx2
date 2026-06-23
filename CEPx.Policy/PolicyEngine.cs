@@ -206,6 +206,7 @@ public static class PolicyEngine
         _candidateNoAbsCount = 0;
         _candidateOutcome = "";
         _candidateReject = "";
+        _candidateFinalized = false;
     }
 
     /// <summary>Update candidate with fresh state and accumulated signals.</summary>
@@ -226,8 +227,10 @@ public static class PolicyEngine
     /// <summary>Finalize candidate: classify and return entry decision or noop.</summary>
     public static PolicyDecision FinalizeCandidate(int tick, double price)
     {
-        if (!_candidateActive) return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0);
+        if (!_candidateActive || _candidateFinalized) return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0);
+        if (InPosition) { _candidateActive = false; return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0); }
         _candidateActive = false;
+        _candidateFinalized = true;
         // Build synthetic BlackboardState from best evidence
         var state = new BlackboardState(
             0, "BTCUSDT", true, "sweep",
@@ -305,6 +308,7 @@ public static class PolicyEngine
         _lastNoAbsTimestamp = 0;
         _lastNoAbsScore = 0;
         _candidateActive = false;
+        _candidateFinalized = false;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
