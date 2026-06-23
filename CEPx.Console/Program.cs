@@ -210,10 +210,10 @@ static DayResult RunDay(int year, int month, int day)
             }
         }
 
-        // ── Candidate finalization: once post-sweep tick window closes ──
-        if (i == postSweepEndTick && postSweepEndTick > 0)
+        // ── Candidate finalization: time-based (not tick-based) ──
+        bool timeExpired = postSweepEndMs > 0 && nowMs >= postSweepEndMs;
+        if ((i == postSweepEndTick || timeExpired) && postSweepEndTick > 0)
         {
-            Console.WriteLine($"[FINALIZE-CHECK] tick={i} hasCandidate={PolicyEngine.HasActiveCandidate} inPos={PolicyEngine.InPosition}");
             if (!PolicyEngine.InPosition && PolicyEngine.HasActiveCandidate)
             {
                 var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
@@ -223,7 +223,8 @@ static DayResult RunDay(int year, int month, int day)
                         0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
                 }
             }
-            postSweepEndTick = 0; // reset after processing
+            postSweepEndTick = 0;
+            postSweepEndMs = 0;
         }
         // END candidate finalization
 
@@ -343,6 +344,12 @@ static DayResult RunDay(int year, int month, int day)
         // Don't overwrite an existing non-sweep candidate
         if (!PolicyEngine.InPosition && !PolicyEngine.HasActiveCandidate)
             PolicyEngine.CreateCandidate(i, postSweepEndTick, sweepOrigin, isBullish, state);
+    }
+
+    // ── End-of-day: finalize any active candidate ────────────────
+    if (PolicyEngine.HasActiveCandidate && !PolicyEngine.InPosition)
+    {
+        PolicyEngine.FinalizeCandidate(ticks.Length - 1, ticks[^1].Price);
     }
 
     PolicyEngine.PrintPaperSummary();
