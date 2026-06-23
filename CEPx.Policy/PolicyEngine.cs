@@ -118,6 +118,11 @@ public static class PolicyEngine
     public static int DiagNoopAfterSignal;  // noop when a reversal signal was active
     public static int DiagReEvalAttempts;   // RefreshState calls
     public static int DiagReEvalEntries;    // entries from re-evaluation
+    // Mode A gate failures (symmetric to Mode B)
+    public static int DiagModeACandidates;
+    public static int DiagModeABlockedEntry; // entryAllowed=false
+    public static int DiagModeABlockedVel;   // velOk=false
+    public static int DiagModeABlockedRev;   // rev >= 0.5
     public static double DiagRevScoreSum;   // sum of all ReversalScore values seen
     public static int DiagRevScoreCount;
     public static int DiagRevScoreNearZero; // rev < 0.10
@@ -218,6 +223,10 @@ public static class PolicyEngine
         DiagNoopAfterSignal = 0;
         DiagReEvalAttempts = 0;
         DiagReEvalEntries = 0;
+        DiagModeACandidates = 0;
+        DiagModeABlockedEntry = 0;
+        DiagModeABlockedVel = 0;
+        DiagModeABlockedRev = 0;
         DiagRevScoreSum = 0;
         DiagRevScoreCount = 0;
         DiagRevScoreNearZero = 0;
@@ -543,6 +552,13 @@ public static class PolicyEngine
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_a", 1.0);
             }
 
+            // DIAG: Mode A gate failures
+            DiagModeACandidates++;
+            if (!entryAllowed) DiagModeABlockedEntry++;
+            if (!velOk) DiagModeABlockedVel++;
+            if (rev >= 0.5) DiagModeABlockedRev++;
+            // END DIAG
+
             // MODE B: Reversal (strict — fewer, better entries)
             bool revRegimeOk = regime == "chop"
                 || (isBull && regime == "downtrend")
@@ -828,6 +844,8 @@ public static class PolicyEngine
         // Decision layer
         Console.WriteLine("-- Decision Layer --");
         Console.WriteLine($"  Decide calls: {DiagDecisionCalls}");
+        Console.WriteLine($"  Mode A candidates: {DiagModeACandidates}");
+        Console.WriteLine($"  Mode A blocked: entry={DiagModeABlockedEntry} vel={DiagModeABlockedVel} revHi={DiagModeABlockedRev}");
         Console.WriteLine($"  Mode B candidates: {DiagModeBCandidates}");
         Console.WriteLine($"  Mode B blocked: vel={DiagModeBBlockedVel} rev={DiagModeBBlockedRev} regime={DiagModeBBlockedRegime} cont={DiagModeBBlockedCont} other={DiagModeBBlockedOther}");
         Console.WriteLine($"  Noop after signal active: {DiagNoopAfterSignal}");
