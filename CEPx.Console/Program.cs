@@ -164,8 +164,8 @@ static DayResult RunDay(int year, int month, int day)
         }
         else
         {
-            // Post-sweep window closed — finalize pending candidate
-            if (PolicyEngine.DiagReEvalAttempts > 0 || i > postSweepEndTick + 1)
+            // Post-sweep window closed — finalize pending candidate once
+            if (i == postSweepEndTick + 1)
             {
                 var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
                 if (finalDecision.Action == "enter")

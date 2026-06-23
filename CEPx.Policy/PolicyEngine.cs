@@ -170,6 +170,7 @@ public static class PolicyEngine
 
     // ── Sweep candidate lifecycle (replaces immediate Mode A/B decision) ──
     private static bool _candidateActive;
+    private static bool _candidateFinalized;
     private static long _candidateCreatedTick;
     private static long _candidateExpiresTick;
     private static double _candidateSweepOrigin;
@@ -225,6 +226,7 @@ public static class PolicyEngine
     /// <summary>Finalize candidate: classify and return entry decision or noop.</summary>
     public static PolicyDecision FinalizeCandidate(int tick, double price)
     {
+        if (!_candidateActive) return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0);
         _candidateActive = false;
         // Build synthetic BlackboardState from best evidence
         var state = new BlackboardState(
