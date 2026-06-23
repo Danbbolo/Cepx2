@@ -210,6 +210,9 @@ static DayResult RunDay(int year, int month, int day)
     if (Environment.GetEnvironmentVariable("DIAG_MODE") == "1")
         PolicyEngine.PrintDiagnostics();
     // END DIAG
+    // PROTODIAG: prototype discrimination diagnostics (always on)
+    PolicyEngine.ProtoDiag.PrintSummary();
+    // END PROTODIAG
     return new DayResult(dateLabel, PolicyEngine.TotalTrades, PolicyEngine.WinningTrades,
         PolicyEngine.TotalPnL, PolicyEngine.ModeACount, PolicyEngine.ModeBCount,
         PolicyEngine.MomDecayExits, PolicyEngine.VelFlipExits, PolicyEngine.RevSigExits, PolicyEngine.OtherExits);

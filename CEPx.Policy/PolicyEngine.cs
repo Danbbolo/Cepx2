@@ -1,4 +1,5 @@
 using CEPx.Core;
+using CEPx.Scoring;
 
 namespace CEPx.Policy;
 
@@ -135,6 +136,10 @@ public static class PolicyEngine
     public static string DiagDataSource = "";
     public static int DiagCandleCount;
     // END DIAG
+
+    // ── Prototype discrimination diagnostics ──────────────────────
+    public static PrototypeDiagnostics ProtoDiag = new();
+    // END PROTODIAG
 
     // ── Structural exit state ─────────────────────────────────────────
     private static readonly List<double> _patternSimHistory = new();
@@ -300,6 +305,16 @@ public static class PolicyEngine
             $"vel={_candidateBestVel:F1} regime={_candidateBestRegime} " +
             $"outcome={decision.Action} reason={decision.Reason}");
 
+        // ── Prototype discrimination record ─────────────────────
+        double conflictOverlap = Math.Min(peakCont, peakRev) / Math.Max(Math.Max(peakCont, peakRev), 0.001);
+        ProtoDiag.RecordCandidate((int)_candidateCreatedTick,
+            peakCont, avgCont, contPersistRatio,
+            peakRev, avgRev, revPersistRatio,
+            conflictOverlap,
+            revSigTotal, contSigTotal,
+            decision.Action, decision.Action == "noop" ? decision.Reason : "");
+        // END PROTODIAG
+
         return decision;
     }
 
@@ -376,6 +391,7 @@ public static class PolicyEngine
         DiagHoldTimes.Clear();
         DiagDataSource = "";
         DiagCandleCount = 0;
+        ProtoDiag = new PrototypeDiagnostics();
     }
 
     public static void RecordPatternSimilarity(double sim)
@@ -851,6 +867,11 @@ public static class PolicyEngine
                 default: OtherExits++; break;
             }
             LogExit(exitPrice, decision.Reason, tickIndex);
+
+            // ── Prototype discrimination: record trade outcome ──
+            ProtoDiag.RecordTradeOutcome(pnl, pnl > 0, decision.Reason);
+            // END PROTODIAG
+
             InPosition = false;
             PositionSide = "";
             _sweepOriginPrice = 0;
