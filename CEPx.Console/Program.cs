@@ -162,19 +162,18 @@ static DayResult RunDay(int year, int month, int day)
                 }
             }
         }
-        else
+
+        // ── Candidate finalization: once post-sweep tick window closes ──
+        if (i == postSweepEndTick && !PolicyEngine.InPosition)
         {
-            // Post-sweep window closed — finalize pending candidate once
-            if (i == postSweepEndTick + 1)
+            var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
+            if (finalDecision.Action == "enter")
             {
-                var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
-                if (finalDecision.Action == "enter")
-                {
-                    PolicyEngine.PaperExecute(finalDecision, ticks[i].Price, "sweep",
-                        0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
-                }
+                PolicyEngine.PaperExecute(finalDecision, ticks[i].Price, "sweep",
+                    0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
             }
         }
+        // END candidate finalization
 
         // ── Exit check when in position ──
         if (PolicyEngine.InPosition && i >= 9)
