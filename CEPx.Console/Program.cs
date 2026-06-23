@@ -49,6 +49,7 @@ double avgPnlPerDay = allResults.Count > 0 ? totalPnl / allResults.Count : 0;
 Console.WriteLine($"{"TOTAL",-12} {totalTrades,7} {avgWin,5:F0}% {totalPnl,7:F2}% {totalModeA,6} {totalModeB,6} {totalMom,4} {totalVel,4} {totalRev,4}");
 Console.WriteLine($"\nAvg PnL/day: {avgPnlPerDay:F2}% | Win rate: {avgWin:F0}%");
 Console.WriteLine($"Modes: mode_a={totalModeA} | mode_b={totalModeB}");
+Console.WriteLine($"Trigger: sweep={PolicyEngine.SweepTriggeredTrades} | non-sweep={PolicyEngine.NonSweepTriggeredTrades}");
 Console.WriteLine($"Mode A with cont signal: {PolicyEngine.ModeAWithContSignal}/{totalModeA}");
 Console.WriteLine($"Mode B with rev signal: {PolicyEngine.ModeBWithRevSignal}/{totalModeB}");
 Console.WriteLine($"Exits: momentum_decay={totalMom} velocity_flip={totalVel} reversal_signal={totalRev} other={totalOther}");
@@ -238,7 +239,76 @@ static DayResult RunDay(int year, int month, int day)
         var w5 = new MarketEvent[5];
         for (int j = 0; j < 5; j++) w5[j] = buf[(i - 4 + j) % 10];
         var sweep = PipelineFunctions.DetectSweepStart(w5);
-        if (sweep == null) continue;
+        if (sweep == null)
+        {
+            // ── Phase E: Non-sweep triggers ───────────────────────
+            // Only fire when no active candidate and no position
+            if (!PolicyEngine.InPosition && !PolicyEngine.HasActiveCandidate && i >= 9)
+            {
+                var nsW10 = new MarketEvent[10];
+                for (int j = 0; j < 10; j++) nsW10[j] = buf[(i - 9 + j) % 10];
+                var nsSnapshot = new ActiveEventSnapshot(
+                    0, true, 0, volTracker.DailyAvgVolume, volTracker.RecentAvgVolume,
+                    volTracker.IsVolumeExpanding, volTracker.IsThinVolume, volTracker.VolumeRatio,
+                    swingTracker.SwingHigh, swingTracker.SwingLow,
+                    swingTracker.CurrentSwingRange, swingTracker.LastSwingDirection,
+                    swingTracker.BullishBOS, swingTracker.BearishBOS,
+                    swingTracker.BOSPrice, swingTracker.BOSTimestamp,
+                    swingTracker.BullishCHoCH, swingTracker.BearishCHoCH,
+                    swingTracker.CHoCHTimestamp);
+                var nsScore = ScoringEngine.ScoreMarket(nsW10, nsSnapshot);
+                var nsState = ScoringEngine.WriteState(nsScore, nsW10);
+
+                // BOS continuation trigger: recent BOS + strong continuation
+                long bosAgeMs = swingTracker.BOSTimestamp > 0
+                    ? ticks[i].Timestamp - swingTracker.BOSTimestamp : long.MaxValue;
+                bool bosRecent = bosAgeMs < 120_000; // 2 min
+                bool bosAligned = (swingTracker.BullishBOS && swingTracker.LastSwingDirection == 1)
+                               || (swingTracker.BearishBOS && swingTracker.LastSwingDirection == -1);
+                if (bosRecent && bosAligned && nsScore.ContinuationConviction >= 0.30)
+                {
+                    double triggerPrice = nsW10[nsW10.Length - 1].Price;
+                    bool bosBullish = swingTracker.LastSwingDirection == 1;
+                    pendingSweepOrigin = triggerPrice;
+                    pendingSweepIsBullish = bosBullish;
+                    postSweepEndMs = ticks[i].Timestamp + POST_SWEEP_WINDOW_MS;
+                    postSweepEndTick = i + 10;
+                    PolicyEngine.CreateCandidate(i, postSweepEndTick, triggerPrice, bosBullish, nsState, "bos");
+                    Console.WriteLine($"[BOS-TRIGGER] tick={i} price={triggerPrice:F2} dir={(bosBullish?"bull":"bear")}");
+                }
+                // Consolidation breakout trigger: tight range + volume expanding
+                double windowRangePct = (nsW10.Max(t => t.Price) - nsW10.Min(t => t.Price))
+                    / nsW10.Min(t => t.Price) * 100;
+                double swingRangePct = swingTracker.CurrentSwingRange > 0
+                    ? swingTracker.CurrentSwingRange / nsW10[0].Price * 100 : windowRangePct;
+                bool isConsolidating = swingRangePct > 0 && windowRangePct / swingRangePct < 0.3;
+                if (isConsolidating && volTracker.IsVolumeExpanding
+                         && nsScore.ContinuationConviction >= 0.25)
+                {
+                    double triggerPrice = nsW10[nsW10.Length - 1].Price;
+                    bool consolBullish = nsW10[nsW10.Length - 1].Price > nsW10[0].Price;
+                    pendingSweepOrigin = triggerPrice;
+                    pendingSweepIsBullish = consolBullish;
+                    postSweepEndMs = ticks[i].Timestamp + POST_SWEEP_WINDOW_MS;
+                    postSweepEndTick = i + 10;
+                    PolicyEngine.CreateCandidate(i, postSweepEndTick, triggerPrice, consolBullish, nsState, "consolidation");
+                    Console.WriteLine($"[CONSOL-TRIGGER] tick={i} price={triggerPrice:F2}");
+                }
+                // Pullback-resume trigger: pullback score high + continuation
+                else if (nsScore.PullbackResumeScore >= 0.5 && nsScore.ContinuationConviction >= 0.30)
+                {
+                    double triggerPrice = nsW10[nsW10.Length - 1].Price;
+                    bool pbBullish = nsW10[nsW10.Length - 1].Price > nsW10[0].Price;
+                    pendingSweepOrigin = triggerPrice;
+                    pendingSweepIsBullish = pbBullish;
+                    postSweepEndMs = ticks[i].Timestamp + POST_SWEEP_WINDOW_MS;
+                    postSweepEndTick = i + 10;
+                    PolicyEngine.CreateCandidate(i, postSweepEndTick, triggerPrice, pbBullish, nsState, "pullback");
+                    Console.WriteLine($"[PULLBACK-TRIGGER] tick={i} price={triggerPrice:F2}");
+                }
+            }
+            continue;
+        }
 
         // Track sweep for post-sweep detectors — time-based window
         pendingSweepOrigin = w5[0].Price;

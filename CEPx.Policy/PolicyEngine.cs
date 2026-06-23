@@ -197,15 +197,31 @@ public static class PolicyEngine
     private static int _candidateNoAbsCount;
     private static string _candidateOutcome = "";
     private static string _candidateReject = "";
+    private static string _candidateTriggerSource = "sweep"; // "sweep", "bos", "consolidation", "pullback"
+
+    /// <summary>True when a candidate is active (sweep or non-sweep trigger).</summary>
+    public static bool HasActiveCandidate => _candidateActive;
+
+    // Phase E: trigger source counters
+    public static int SweepTriggeredTrades;
+    public static int NonSweepTriggeredTrades;
 
     /// <summary>Create a pending sweep candidate — entry decision deferred to window close.</summary>
     public static void CreateCandidate(int tick, long expiresTick, double sweepOrigin, bool isBullish, BlackboardState state)
+    {
+        CreateCandidate(tick, expiresTick, sweepOrigin, isBullish, state, "sweep");
+    }
+
+    /// <summary>Create a pending candidate with explicit trigger source.</summary>
+    public static void CreateCandidate(int tick, long expiresTick, double sweepOrigin, bool isBullish,
+        BlackboardState state, string triggerSource)
     {
         _candidateActive = true;
         _candidateCreatedTick = tick;
         _candidateExpiresTick = expiresTick;
         _candidateSweepOrigin = sweepOrigin;
         _candidateIsBullish = isBullish;
+        _candidateTriggerSource = triggerSource;
         _candidateBestContSim = state.PatternSimilarity;
         _candidateBestRevScore = state.ReversalScore;
         _candidateBestVel = state.KalmanVelocity;
@@ -223,6 +239,7 @@ public static class PolicyEngine
         _candidateOutcome = "";
         _candidateReject = "";
         _candidateFinalized = false;
+        _candidateTriggerSource = "sweep"; // default
     }
 
     /// <summary>Update candidate with fresh state and accumulated signals.</summary>
@@ -315,7 +332,8 @@ public static class PolicyEngine
             conflictOverlap,
             revSigTotal, contSigTotal,
             effectiveCont, effectiveRev,
-            protoOutcome, protoReason);
+            protoOutcome, protoReason,
+            _candidateTriggerSource);
         // END PROTODIAG
 
         return decision;
@@ -355,6 +373,9 @@ public static class PolicyEngine
         _lastNoAbsScore = 0;
         _candidateActive = false;
         _candidateFinalized = false;
+        _candidateTriggerSource = "sweep";
+        SweepTriggeredTrades = 0;
+        NonSweepTriggeredTrades = 0;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
@@ -942,6 +963,8 @@ public static class PolicyEngine
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
             if (decision.Reason == "mode_a") ModeACount++;
             else if (decision.Reason == "mode_b") ModeBCount++;
+            if (_candidateTriggerSource == "sweep") SweepTriggeredTrades++;
+            else NonSweepTriggeredTrades++;
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);
         }
         else if (decision.Action == "exit" && InPosition)

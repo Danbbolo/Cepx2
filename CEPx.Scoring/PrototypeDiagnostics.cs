@@ -32,7 +32,8 @@ public class PrototypeDiagnostics
         double conflictOverlap,
         int revSignalCount, int contSignalCount,
         double effectiveCont, double effectiveRev,
-        string finalOutcome, string noopReason)
+        string finalOutcome, string noopReason,
+        string triggerSource = "sweep")
     {
         var rec = new CandidateRecord
         {
@@ -51,6 +52,7 @@ public class PrototypeDiagnostics
             EffectiveRevScore = effectiveRev,
             FinalOutcome = finalOutcome,
             NoopReason = noopReason,
+            TriggerSource = triggerSource,
             FamilyContScore = _pendingFamilyCont,
             FamilyRevScore = _pendingFamilyRev,
             FamilyBOSScore = _pendingFamilyBOS,
@@ -115,6 +117,15 @@ public class PrototypeDiagnostics
         Console.WriteLine($"  Total candidates: {n}");
         Console.WriteLine($"    Entered: {entered.Count}  (mode_a={modeA.Count}  mode_b={modeB.Count})");
         Console.WriteLine($"    Noop:    {noops.Count}");
+        // Trigger source breakdown
+        int sweepCand = _candidates.Count(c => c.TriggerSource == "sweep");
+        int bosCand = _candidates.Count(c => c.TriggerSource == "bos");
+        int consolCand = _candidates.Count(c => c.TriggerSource == "consolidation");
+        int pbCand = _candidates.Count(c => c.TriggerSource == "pullback");
+        Console.WriteLine($"    Trigger: sweep={sweepCand} bos={bosCand} consolidation={consolCand} pullback={pbCand}");
+        int sweepEntered = entered.Count(c => c.TriggerSource == "sweep");
+        int nonSweepEntered = entered.Count(c => c.TriggerSource != "sweep");
+        Console.WriteLine($"    Entered by trigger: sweep={sweepEntered} non-sweep={nonSweepEntered}");
 
         // ── 1. Score distributions by outcome ─────────────────────
         PrintScoreDistributions("Continuation Score", entered, noops, modeA, modeB,
@@ -693,6 +704,7 @@ public class PrototypeDiagnostics
         public int ContSignalCount;
         public string FinalOutcome;  // "mode_a", "mode_b", "noop"
         public string NoopReason;
+        public string TriggerSource; // "sweep", "bos", "consolidation", "pullback"
         public double PnL;
         public bool IsWin;
         public string ExitReason;
