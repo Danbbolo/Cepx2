@@ -2,7 +2,9 @@
   <Project Path="CEPx.Blackboard/CEPx.Blackboard.csproj" />
   <Project Path="CEPx.Console/CEPx.Console.csproj" />
   <Project Path="CEPx.Core/CEPx.Core.csproj" />
+  <Project Path="CEPx.EventGrammar/CEPx.EventGrammar.csproj" />
   <Project Path="CEPx.Pipeline/CEPx.Pipeline.csproj" />
   <Project Path="CEPx.Policy/CEPx.Policy.csproj" />
+  <Project Path="CEPx.Scoring/CEPx.Scoring.csproj" />
   <Project Path="CEPx.Tests/CEPx.Tests.csproj" />
 </Solution>
