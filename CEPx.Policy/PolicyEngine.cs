@@ -20,8 +20,10 @@ public static class PolicyEngine
     private const double TRAPPED_REV_THRESHOLD = 0.3;
     private const double TRAPPED_ANOMALY_THRESHOLD = 0.3;
     private const int TRAPPED_MAX_TICKS = 5;
-    private const int MOMENTUM_DECAY_CONFIRM = 4;
-    private const int VELOCITY_FLIP_CONFIRM = 8;
+    private const int MOMENTUM_DECAY_CONFIRM = 4; // tick fallback for tests
+    private const int VELOCITY_FLIP_CONFIRM = 8; // tick fallback for tests
+    private const long VELOCITY_FLIP_TIME_MS = 600_000; // 10 minutes
+    private const long MOMENTUM_DECAY_TIME_MS = 300_000; // 5 minutes
     private const double VELOCITY_FLIP_MIN_MAGNITUDE = 0.8;
     private const double VELOCITY_FLIP_SIM_GATE = 0.25;
     private const double MODE_B_REVERSAL_THRESHOLD = 0.32;
@@ -50,8 +52,10 @@ public static class PolicyEngine
     private static double _sweepOriginPrice;
     private static bool _sweepIsBullish;
     private static int _ticksSinceEntry;
-    private static int _momentumDecayCount;
-    private static int _velocityFlipCount;
+    private static int _momentumDecayTicks; // tick fallback
+    private static long _momentumDecayStartMs;
+    private static int _velocityFlipTicks; // tick fallback
+    private static long _velocityFlipStartMs;
     private static int _lastSweepTick = -999;
     private static readonly List<double> _recentVelocities = new();
 
@@ -64,8 +68,8 @@ public static class PolicyEngine
         _sweepOriginPrice = 0;
         _sweepIsBullish = false;
         _ticksSinceEntry = 0;
-        _momentumDecayCount = 0;
-        _velocityFlipCount = 0;
+        _momentumDecayTicks = 0; _momentumDecayStartMs = 0;
+        _velocityFlipTicks = 0; _velocityFlipStartMs = 0;
         _recentVelocities.Clear();
         _patternSimHistory.Clear();
         _entryReasons.Clear();
@@ -126,10 +130,19 @@ public static class PolicyEngine
             bool simBelowAbsolute = state.PatternSimilarity < MOMENTUM_DECAY_SIM_ABSOLUTE;
             bool simDeclining = IsPatternSimilarityDeclining();
             if ((simBelowThreshold && simDeclining) || simBelowAbsolute)
-                _momentumDecayCount++;
+            {
+                if (_momentumDecayStartMs == 0) _momentumDecayStartMs = state.Timestamp;
+                _momentumDecayTicks++;
+            }
             else
-                _momentumDecayCount = 0;
-            if (_momentumDecayCount >= MOMENTUM_DECAY_CONFIRM)
+            {
+                _momentumDecayStartMs = 0;
+                _momentumDecayTicks = 0;
+            }
+            bool momDecayFired = state.Timestamp > 0
+                ? (_momentumDecayStartMs > 0 && state.Timestamp - _momentumDecayStartMs >= MOMENTUM_DECAY_TIME_MS)
+                : (_momentumDecayTicks >= MOMENTUM_DECAY_CONFIRM);
+            if (momDecayFired)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "momentum_decay", 1.0);
 
             // 2. Structural Invalidation
@@ -169,10 +182,19 @@ public static class PolicyEngine
                          || (PositionSide == "short" && state.KalmanVelocity > VELOCITY_FLIP_MIN_MAGNITUDE);
             bool patternDying = state.PatternSimilarity < VELOCITY_FLIP_SIM_GATE;
             if (velWrong && patternDying)
-                _velocityFlipCount++;
+            {
+                if (_velocityFlipStartMs == 0) _velocityFlipStartMs = state.Timestamp;
+                _velocityFlipTicks++;
+            }
             else
-                _velocityFlipCount = 0;
-            if (_velocityFlipCount >= VELOCITY_FLIP_CONFIRM)
+            {
+                _velocityFlipStartMs = 0;
+                _velocityFlipTicks = 0;
+            }
+            bool velFlipFired = state.Timestamp > 0
+                ? (_velocityFlipStartMs > 0 && state.Timestamp - _velocityFlipStartMs >= VELOCITY_FLIP_TIME_MS)
+                : (_velocityFlipTicks >= VELOCITY_FLIP_CONFIRM);
+            if (velFlipFired)
                 return new PolicyDecision(state.Timestamp, state.Symbol, "exit", "", "velocity_flip", 1.0);
         }
 
@@ -228,8 +250,8 @@ public static class PolicyEngine
             _sweepOriginPrice = sweepOriginPrice;
             _sweepIsBullish = isBullishSweep;
             _ticksSinceEntry = 0;
-            _momentumDecayCount = 0;
-            _velocityFlipCount = 0;
+            _momentumDecayTicks = 0; _momentumDecayStartMs = 0;
+            _velocityFlipTicks = 0; _velocityFlipStartMs = 0;
             _recentVelocities.Clear();
             _patternSimHistory.Clear();
             Console.WriteLine($"PAPER ENTER {decision.Side} @ {EntryPrice:F2}");
