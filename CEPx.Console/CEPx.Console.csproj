@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CEPx.Pipeline\CEPx.Pipeline.csproj" />
     <ProjectReference Include="..\CEPx.Blackboard\CEPx.Blackboard.csproj" />
+    <ProjectReference Include="..\CEPx.Scoring\CEPx.Scoring.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

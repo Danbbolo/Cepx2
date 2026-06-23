@@ -1,5 +1,6 @@
-﻿using CEPx.Core;
+using CEPx.Core;
 using CEPx.Pipeline;
+using CEPx.Scoring;
 using Xunit;
 
 namespace CEPx.Tests;
@@ -40,7 +41,7 @@ public class EventGrammarTests
     [Fact]
     public void SweepStart_fires_on_high_move_even_with_low_volume()
     {
-        // Volume filter removed — detector is pure. BT filters later.
+        // Volume filter removed � detector is pure. BT filters later.
         var ticks = new MarketEvent[]
         {
             new(0,   "BTCUSDT", 42000.0, 1.0, 0, 0, 0),
@@ -59,7 +60,7 @@ public class EventGrammarTests
     {
         double[] proto = { 1.0, 2.0, 3.0 };
         double[] cand  = { 1.0, 2.0, 3.0 };
-        var d = PipelineFunctions.ComputeDtw(proto, cand, 1);
+        var d = ScoringEngine.ComputeDtw(proto, cand, 1);
         Assert.True(d < 0.001);
     }
 
@@ -67,7 +68,7 @@ public class EventGrammarTests
     public void Dtw_returns_MaxValue_for_sequences_over_50()
     {
         double[] big = new double[51];
-        var d = PipelineFunctions.ComputeDtw(big, big, 3);
+        var d = ScoringEngine.ComputeDtw(big, big, 3);
         Assert.Equal(double.MaxValue, d);
     }
 
@@ -76,7 +77,7 @@ public class EventGrammarTests
     {
         var evt = new CepEvent(0, "BTCUSDT", "SweepStart", 42300.0, "");
         var ticks = PipelineFunctions.SyntheticTicks("BTCUSDT");
-        var score = PipelineFunctions.ScoreWithKalman(evt, ticks);
+        var score = ScoringEngine.ScoreWithKalman(evt, ticks);
         Assert.True(score.UncertaintyUpper > score.StateMean);
         Assert.True(score.StateMean > score.UncertaintyLower);
     }
@@ -88,7 +89,7 @@ public class EventGrammarTests
         var ticks = new MarketEvent[10];
         for (int i = 0; i < 10; i++)
             ticks[i] = new MarketEvent(i * 100L, "BTCUSDT", 42000.0, 1.0, 0, 0, 0);
-        var score = PipelineFunctions.ScoreEvent(evt, ticks);
+        var score = ScoringEngine.ScoreEvent(evt, ticks);
         Assert.Equal(0.0, score.PatternSimilarity);
     }
 

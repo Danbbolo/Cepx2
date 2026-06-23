@@ -1,6 +1,7 @@
 using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
+using CEPx.Scoring;
 
 // ── Multi-day test dates (add/remove as needed) ──
 var testDates = new[] {
@@ -72,8 +73,8 @@ static DayResult RunDay(int year, int month, int day)
             var w10 = new MarketEvent[10];
             for (int j = 0; j < 10; j++) w10[j] = buf[(i - 9 + j) % 10];
             var exitSweep = new CepEvent(ticks[i].Timestamp, "BTCUSDT", "SweepStart", ticks[i].Price, "");
-            var exitScore = PipelineFunctions.ScoreEvent(exitSweep, w10);
-            var exitState = PipelineFunctions.WriteState(exitScore, w10);
+            var exitScore = ScoringEngine.ScoreEvent(exitSweep, w10);
+            var exitState = ScoringEngine.WriteState(exitScore, w10);
             PolicyEngine.RecordPatternSimilarity(exitState.PatternSimilarity);
             var exitDecision = PolicyEngine.Decide(exitState, i, ticks[i].Price);
             if (exitDecision.Action == "exit")
@@ -89,8 +90,8 @@ static DayResult RunDay(int year, int month, int day)
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
         for (int j = 0; j < 10; j++) scoreW10[j] = buf[(i - 9 + j) % 10];
-        var score = PipelineFunctions.ScoreEvent(sweep.Value, scoreW10);
-        var state = PipelineFunctions.WriteState(score, scoreW10);
+        var score = ScoringEngine.ScoreEvent(sweep.Value, scoreW10);
+        var state = ScoringEngine.WriteState(score, scoreW10);
 
         double sweepOrigin = w5[0].Price;
         bool isBullish = sweep.Value.Context == "bullish";
