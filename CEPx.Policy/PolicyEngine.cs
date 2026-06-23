@@ -33,6 +33,8 @@ public static class PolicyEngine
     private const double MODE_B_ANOMALY_MAX = 0.4;
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const long MODE_B_MAX_SWEEP_AGE_MS = 480_000; // 8 minutes
+    private const long EVENT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long event signals stay valid
+    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when event signals present
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -60,6 +62,8 @@ public static class PolicyEngine
     private static int _velocityFlipTicks; // tick fallback
     private static long _velocityFlipStartMs;
     private static long _lastSweepMs; // timestamp of last sweep
+    private static string _lastEventType = ""; // most recent EventGrammar signal
+    private static long _lastEventTimestamp; // when it fired
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -95,6 +99,16 @@ public static class PolicyEngine
     {
         _recentVelocities.Add(vel);
         if (_recentVelocities.Count > VELOCITY_HISTORY_TICKS) _recentVelocities.RemoveAt(0);
+    }
+
+    /// <summary>Feed EventGrammar signals into the BT for decision support.</summary>
+    public static void RecordEvent(CepEvent evt)
+    {
+        if (evt.Type == "AbsorptionAfterSweep" || evt.Type == "ExhaustionAfterSweep" || evt.Type == "Reclaim")
+        {
+            _lastEventType = evt.Type;
+            _lastEventTimestamp = evt.Timestamp;
+        }
     }
 
     private static bool HasVelocityDirectionChanged()
@@ -237,7 +251,15 @@ public static class PolicyEngine
             bool sweepRecent = state.Timestamp - _lastSweepMs <= MODE_B_MAX_SWEEP_AGE_MS;
             bool revStrongerThanCont = rev > state.PatternSimilarity;
             bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
-            if (rev >= MODE_B_REVERSAL_THRESHOLD && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
+
+            // EventGrammar boost: recent absorption/exhaustion/reclaim lowers reversal threshold
+            bool eventSignalActive = _lastEventType != "" &&
+                state.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
+            double effectiveRevThreshold = eventSignalActive
+                ? MODE_B_REVERSAL_THRESHOLD - MODE_B_EVENT_BOOST
+                : MODE_B_REVERSAL_THRESHOLD;
+
+            if (rev >= effectiveRevThreshold && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {
                 _entryStartMs = state.Timestamp;
                 string side = isBull ? "short" : "long"; // fade the sweep
