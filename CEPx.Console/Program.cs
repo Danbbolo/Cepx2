@@ -73,10 +73,16 @@ static DayResult RunDay(int year, int month, int day)
     {
         var chdPath = Path.Combine(chdCsvDir, $"{dateLabel}.csv");
         if (File.Exists(chdPath))
+        {
             ticks = PipelineFunctions.FetchChdCsv(chdPath);
+            PolicyEngine.DiagDataSource = $"CHD ({dateLabel})";
+        }
         else
             Console.WriteLine($"[CHD_SPIKE] Missing: {chdPath} — falling back to Binance");
     }
+    if (string.IsNullOrEmpty(PolicyEngine.DiagDataSource))
+        PolicyEngine.DiagDataSource = $"Binance klines ({dateLabel})";
+    PolicyEngine.DiagCandleCount = ticks.Length;
     // END CHD_SPIKE
 
     // Fetch liquidations for the same time window
@@ -136,11 +142,13 @@ static DayResult RunDay(int year, int month, int day)
             // ── Strong reversal signal → re-evaluate with current window ──
             if (exhaustion != null || liqCluster != null)
             {
+                PolicyEngine.DiagReEvalAttempts++;
                 var freshState = ScoringEngine.RefreshState(w10, pendingSweepIsBullish);
                 var reDecision = PolicyEngine.Decide(freshState, i, ticks[i].Price,
                     pendingSweepOrigin, pendingSweepIsBullish);
                 if (reDecision.Action == "enter")
                 {
+                    PolicyEngine.DiagReEvalEntries++;
                     PolicyEngine.PaperExecute(reDecision, ticks[i].Price, "sweep",
                         freshState.PatternSimilarity, freshState.KalmanVelocity, i,
                         pendingSweepOrigin, pendingSweepIsBullish);
@@ -191,6 +199,10 @@ static DayResult RunDay(int year, int month, int day)
     }
 
     PolicyEngine.PrintPaperSummary();
+    // DIAG: print structural diagnostics if enabled
+    if (Environment.GetEnvironmentVariable("DIAG_MODE") == "1")
+        PolicyEngine.PrintDiagnostics();
+    // END DIAG
     return new DayResult(dateLabel, PolicyEngine.TotalTrades, PolicyEngine.WinningTrades,
         PolicyEngine.TotalPnL, PolicyEngine.ModeACount, PolicyEngine.ModeBCount,
         PolicyEngine.MomDecayExits, PolicyEngine.VelFlipExits, PolicyEngine.RevSigExits, PolicyEngine.OtherExits);

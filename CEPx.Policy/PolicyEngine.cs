@@ -107,6 +107,29 @@ public static class PolicyEngine
     public static int ModeAWithContSignal; // Mode A entries where a cont signal was active
     public static int ModeBWithRevSignal;  // Mode B entries where a reversal signal gave a boost
 
+    // ── DIAG: diagnostic counters (remove after analysis) ───────
+    public static int DiagDecisionCalls;
+    public static int DiagModeBCandidates; // Mode B evaluated (all pre-gates passed)
+    public static int DiagModeBBlockedVel; // Mode B blocked by velExhausted
+    public static int DiagModeBBlockedRev; // Mode B blocked by rev threshold
+    public static int DiagModeBBlockedRegime;
+    public static int DiagModeBBlockedCont; // rev <= contSim
+    public static int DiagModeBBlockedOther; // sweepRecent, anomalyLow
+    public static int DiagNoopAfterSignal;  // noop when a reversal signal was active
+    public static int DiagReEvalAttempts;   // RefreshState calls
+    public static int DiagReEvalEntries;    // entries from re-evaluation
+    public static double DiagRevScoreSum;   // sum of all ReversalScore values seen
+    public static int DiagRevScoreCount;
+    public static int DiagRevScoreNearZero; // rev < 0.10
+    public static int DiagRevScoreHighNoB;  // rev >= 0.32 but no Mode B entry
+    public static double DiagContSimSum;
+    public static int DiagContSimCount;
+    public static int DiagEarlyReversals;   // reversal_signal exit within 10 ticks
+    public static List<double> DiagHoldTimes = new(); // hold times in minutes
+    public static string DiagDataSource = "";
+    public static int DiagCandleCount;
+    // END DIAG
+
     // ── Structural exit state ─────────────────────────────────────────
     private static readonly List<double> _patternSimHistory = new();
     private static double _sweepOriginPrice;
@@ -185,6 +208,26 @@ public static class PolicyEngine
         NoAbsorptionCount = 0;
         ModeAWithContSignal = 0;
         ModeBWithRevSignal = 0;
+        DiagDecisionCalls = 0;
+        DiagModeBCandidates = 0;
+        DiagModeBBlockedVel = 0;
+        DiagModeBBlockedRev = 0;
+        DiagModeBBlockedRegime = 0;
+        DiagModeBBlockedCont = 0;
+        DiagModeBBlockedOther = 0;
+        DiagNoopAfterSignal = 0;
+        DiagReEvalAttempts = 0;
+        DiagReEvalEntries = 0;
+        DiagRevScoreSum = 0;
+        DiagRevScoreCount = 0;
+        DiagRevScoreNearZero = 0;
+        DiagRevScoreHighNoB = 0;
+        DiagContSimSum = 0;
+        DiagContSimCount = 0;
+        DiagEarlyReversals = 0;
+        DiagHoldTimes.Clear();
+        DiagDataSource = "";
+        DiagCandleCount = 0;
     }
 
     public static void RecordPatternSimilarity(double sim)
@@ -318,6 +361,9 @@ public static class PolicyEngine
         // Record velocity every tick for direction-change detection
         RecordVelocity(state.KalmanVelocity);
         if (state.SweepActive) _lastSweepMs = state.Timestamp;
+        DiagDecisionCalls++;
+        // DIAG: score tracking when sweep is active
+        if (state.SweepActive) RecordScoreStats(state.PatternSimilarity, state.ReversalScore);
 
         if (InPosition)
         {
@@ -586,7 +632,23 @@ public static class PolicyEngine
                 string side = isBull ? "short" : "long"; // fade the sweep
                 return new PolicyDecision(state.Timestamp, state.Symbol, "enter", side, "mode_b", 1.0);
             }
+
+            // DIAG: track Mode B gate failures
+            DiagModeBCandidates++;
+            if (!velExhausted) DiagModeBBlockedVel++;
+            if (rev < effectiveRevThreshold) DiagModeBBlockedRev++;
+            if (!revRegimeOk) DiagModeBBlockedRegime++;
+            if (!revStrongerThanCont) DiagModeBBlockedCont++;
+            if (!sweepRecent || !anomalyLow) DiagModeBBlockedOther++;
+            // DIAG: high rev score that still didn't enter Mode B
+            if (rev >= MODE_B_REVERSAL_THRESHOLD) DiagRevScoreHighNoB++;
+            // END DIAG
         }
+
+        // DIAG: noop while a reversal signal is active
+        if (state.SweepActive && (_lastExhaustionType != "" || _lastEventType != "" || _lastLiqType != ""))
+            DiagNoopAfterSignal++;
+        // END DIAG
 
         return new PolicyDecision(state.Timestamp, state.Symbol, "noop", "", "", 0.0);
     }
@@ -687,6 +749,12 @@ public static class PolicyEngine
         _pnls.Add(pnl); _detectors.Add(_pendingDetector); _exitReasons.Add(reason);
         _similarities.Add(_pendingSimilarity); _velocities.Add(_pendingVelocity);
         _holdingTicks.Add(tickIndex - _pendingEntryTick);
+        // DIAG: track hold time and early reversals
+        int holdTicks = tickIndex - _pendingEntryTick;
+        DiagHoldTimes.Add(holdTicks);
+        if (reason == "reversal_signal" && holdTicks <= 10)
+            DiagEarlyReversals++;
+        // END DIAG
         _hasPending = false;
     }
 
@@ -723,4 +791,55 @@ public static class PolicyEngine
         for (int i = 0; i < _entryTimes.Count; i++)
             w.WriteLine($"{_entryTimes[i]},{_exitTimes[i]},{_entryPrices[i]:F2},{_exitPrices[i]:F2},{_pnls[i]:F2},{_detectors[i]},{_similarities[i]:F4},{_velocities[i]:F2}");
     }
+
+    // ── DIAG: diagnostic output (remove after analysis) ─────────────
+    public static void RecordScoreStats(double contSim, double revScore)
+    {
+        DiagContSimSum += contSim;
+        DiagRevScoreSum += revScore;
+        DiagContSimCount++;
+        DiagRevScoreCount++;
+        if (revScore < 0.10) DiagRevScoreNearZero++;
+    }
+
+    public static void PrintDiagnostics()
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== STRUCTURAL DIAGNOSTICS ===");
+        Console.WriteLine($"Data source: {DiagDataSource} | Candles: {DiagCandleCount}");
+        Console.WriteLine();
+
+        // Scoring layer
+        double avgCont = DiagContSimCount > 0 ? DiagContSimSum / DiagContSimCount : 0;
+        double avgRev = DiagRevScoreCount > 0 ? DiagRevScoreSum / DiagRevScoreCount : 0;
+        Console.WriteLine("-- Scoring Layer --");
+        Console.WriteLine($"  Avg ContinuationSim: {avgCont:F4}");
+        Console.WriteLine($"  Avg ReversalScore:   {avgRev:F4}");
+        Console.WriteLine($"  Near-zero rev (<0.10): {DiagRevScoreNearZero}/{DiagRevScoreCount}");
+        Console.WriteLine($"  High rev (>=0.32) no ModeB: {DiagRevScoreHighNoB}");
+        Console.WriteLine();
+
+        // Event layer (existing counters)
+        Console.WriteLine("-- Event Layer --");
+        Console.WriteLine($"  Absorption: {AbsorptionCount}  Exhaustion: {ExhaustionCount}  Reclaim: {ReclaimCount}  LiqCluster: {LiquidationClusterCount}");
+        Console.WriteLine($"  MomentumPersistence: {MomentumPersistenceCount}  NoAbsorption: {NoAbsorptionCount}");
+        Console.WriteLine();
+
+        // Decision layer
+        Console.WriteLine("-- Decision Layer --");
+        Console.WriteLine($"  Decide calls: {DiagDecisionCalls}");
+        Console.WriteLine($"  Mode B candidates: {DiagModeBCandidates}");
+        Console.WriteLine($"  Mode B blocked: vel={DiagModeBBlockedVel} rev={DiagModeBBlockedRev} regime={DiagModeBBlockedRegime} cont={DiagModeBBlockedCont} other={DiagModeBBlockedOther}");
+        Console.WriteLine($"  Noop after signal active: {DiagNoopAfterSignal}");
+        Console.WriteLine($"  Re-eval attempts: {DiagReEvalAttempts}  Re-eval entries: {DiagReEvalEntries}");
+        Console.WriteLine();
+
+        // Exit layer
+        Console.WriteLine("-- Exit Layer --");
+        Console.WriteLine($"  momentum_decay={MomDecayExits} velocity_flip={VelFlipExits} reversal_signal={RevSigExits} other={OtherExits}");
+        if (DiagHoldTimes.Count > 0)
+            Console.WriteLine($"  Avg hold ticks: {DiagHoldTimes.Average():F1}  Early reversals (<=10t): {DiagEarlyReversals}");
+        Console.WriteLine($"  Stop losses: {TotalTrades - WinningTrades - (TotalTrades - WinningTrades)}");
+    }
+    // END DIAG
 }
