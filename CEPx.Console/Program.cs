@@ -68,9 +68,15 @@ static DayResult RunDay(int year, int month, int day)
     if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
     // CHD_SPIKE: use CHD CSV if path provided via env var (remove after full integration)
-    var chdCsvPath = Environment.GetEnvironmentVariable("CHD_CSV_PATH");
-    if (!string.IsNullOrEmpty(chdCsvPath) && File.Exists(chdCsvPath))
-        ticks = PipelineFunctions.FetchChdCsv(chdCsvPath);
+    var chdCsvDir = Environment.GetEnvironmentVariable("CHD_CSV_DIR");
+    if (!string.IsNullOrEmpty(chdCsvDir))
+    {
+        var chdPath = Path.Combine(chdCsvDir, $"{dateLabel}.csv");
+        if (File.Exists(chdPath))
+            ticks = PipelineFunctions.FetchChdCsv(chdPath);
+        else
+            Console.WriteLine($"[CHD_SPIKE] Missing: {chdPath} — falling back to Binance");
+    }
     // END CHD_SPIKE
 
     // Fetch liquidations for the same time window
