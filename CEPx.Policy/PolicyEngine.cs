@@ -209,6 +209,9 @@ public static class PolicyEngine
     public static int NonSweepWins;
     public static double SweepPnl;
     public static double NonSweepPnl;
+    public static int NonSweepCandidatesCreated;
+    public static int NonSweepCandidatesFinalized;
+    public static int NonSweepCandidatesEntered;
 
     /// <summary>Create a pending sweep candidate — entry decision deferred to window close.</summary>
     public static void CreateCandidate(int tick, long expiresTick, double sweepOrigin, bool isBullish, BlackboardState state)
@@ -226,6 +229,7 @@ public static class PolicyEngine
         _candidateSweepOrigin = sweepOrigin;
         _candidateIsBullish = isBullish;
         _candidateTriggerSource = triggerSource;
+        if (triggerSource != "sweep") NonSweepCandidatesCreated++;
         _candidateBestContSim = state.PatternSimilarity;
         _candidateBestRevScore = state.ReversalScore;
         _candidateBestVel = state.KalmanVelocity;
@@ -275,6 +279,9 @@ public static class PolicyEngine
         if (InPosition) { _candidateActive = false; return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0); }
         _candidateActive = false;
         _candidateFinalized = true;
+        if (_candidateTriggerSource != "sweep") NonSweepCandidatesFinalized++;
+        if (_candidateTriggerSource != "sweep")
+            Console.WriteLine($"[NS-FINALIZE] tick={_candidateCreatedTick} src={_candidateTriggerSource} cont={_candidateBestContSim:F3} rev={_candidateBestRevScore:F3}");
 
         // ── Coherence scoring ───────────────────────────────────
         int n = _candidateUpdateCount;
@@ -416,6 +423,9 @@ public static class PolicyEngine
         NonSweepWins = 0;
         SweepPnl = 0;
         NonSweepPnl = 0;
+        NonSweepCandidatesCreated = 0;
+        NonSweepCandidatesFinalized = 0;
+        NonSweepCandidatesEntered = 0;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
@@ -1000,7 +1010,7 @@ public static class PolicyEngine
             if (decision.Reason == "mode_a") ModeACount++;
             else if (decision.Reason == "mode_b") ModeBCount++;
             if (_candidateTriggerSource == "sweep") SweepTriggeredTrades++;
-            else NonSweepTriggeredTrades++;
+            else { NonSweepTriggeredTrades++; NonSweepCandidatesEntered++; }
             if (detector != "") LogEnter(EntryPrice, detector, similarity, velocity, tickIndex, decision.Reason);
         }
         else if (decision.Action == "exit" && InPosition)

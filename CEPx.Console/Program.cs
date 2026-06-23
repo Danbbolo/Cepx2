@@ -54,6 +54,7 @@ if (PolicyEngine.SweepTriggeredTrades > 0)
     Console.WriteLine($"  Sweep: {PolicyEngine.SweepWins}/{PolicyEngine.SweepTriggeredTrades} wins ({100.0*PolicyEngine.SweepWins/PolicyEngine.SweepTriggeredTrades:F0}%) PnL={PolicyEngine.SweepPnl:F2}%");
 if (PolicyEngine.NonSweepTriggeredTrades > 0)
     Console.WriteLine($"  NonSweep: {PolicyEngine.NonSweepWins}/{PolicyEngine.NonSweepTriggeredTrades} wins ({100.0*PolicyEngine.NonSweepWins/PolicyEngine.NonSweepTriggeredTrades:F0}%) PnL={PolicyEngine.NonSweepPnl:F2}%");
+Console.WriteLine($"  NS diag: created={PolicyEngine.NonSweepCandidatesCreated} finalized={PolicyEngine.NonSweepCandidatesFinalized} entered={PolicyEngine.NonSweepCandidatesEntered}");
 Console.WriteLine($"Mode A with cont signal: {PolicyEngine.ModeAWithContSignal}/{totalModeA}");
 Console.WriteLine($"Mode B with rev signal: {PolicyEngine.ModeBWithRevSignal}/{totalModeB}");
 Console.WriteLine($"Exits: momentum_decay={totalMom} velocity_flip={totalVel} reversal_signal={totalRev} other={totalOther}");
