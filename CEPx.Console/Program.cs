@@ -211,14 +211,18 @@ static DayResult RunDay(int year, int month, int day)
         }
 
         // ── Candidate finalization: once post-sweep tick window closes ──
-        if (i == postSweepEndTick && !PolicyEngine.InPosition)
+        if (i == postSweepEndTick && postSweepEndTick > 0)
         {
-            var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
-            if (finalDecision.Action == "enter")
+            if (!PolicyEngine.InPosition && PolicyEngine.HasActiveCandidate)
             {
-                PolicyEngine.PaperExecute(finalDecision, ticks[i].Price, "sweep",
-                    0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
+                var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
+                if (finalDecision.Action == "enter")
+                {
+                    PolicyEngine.PaperExecute(finalDecision, ticks[i].Price, "sweep",
+                        0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
+                }
             }
+            postSweepEndTick = 0; // reset after processing
         }
         // END candidate finalization
 
