@@ -71,6 +71,7 @@ public static class PolicyEngine
         _sweepOriginPrice = 0;
         _sweepIsBullish = false;
         _entryStartMs = 0;
+        _ticksSinceEntry = 0;
         _momentumDecayTicks = 0; _momentumDecayStartMs = 0;
         _velocityFlipTicks = 0; _velocityFlipStartMs = 0;
         _recentVelocities.Clear();
