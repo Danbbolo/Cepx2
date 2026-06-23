@@ -75,14 +75,10 @@ static DayResult RunDay(int year, int month, int day)
         if (File.Exists(chdPath))
         {
             ticks = PipelineFunctions.FetchChdCsv(chdPath);
-            PolicyEngine.DiagDataSource = $"CHD ({dateLabel})";
         }
         else
             Console.WriteLine($"[CHD_SPIKE] Missing: {chdPath} — falling back to Binance");
     }
-    if (string.IsNullOrEmpty(PolicyEngine.DiagDataSource))
-        PolicyEngine.DiagDataSource = $"Binance klines ({dateLabel})";
-    PolicyEngine.DiagCandleCount = ticks.Length;
     // END CHD_SPIKE
 
     // Fetch liquidations for the same time window
@@ -102,6 +98,12 @@ static DayResult RunDay(int year, int month, int day)
     Console.WriteLine($"\n=== {dateLabel} — {ticks.Length} candles ===");
 
     PolicyEngine.Reset();
+    // DIAG: set data source after Reset (which clears it)
+    PolicyEngine.DiagDataSource = string.IsNullOrEmpty(chdCsvDir)
+        ? $"Binance klines ({dateLabel})"
+        : $"CHD ({dateLabel})";
+    PolicyEngine.DiagCandleCount = ticks.Length;
+    // END DIAG
 
     const long POST_SWEEP_WINDOW_MS = 600_000; // 10 minutes — monitor for events after sweep
     var buf = new MarketEvent[10];
