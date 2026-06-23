@@ -34,7 +34,10 @@ public static class PolicyEngine
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const long MODE_B_MAX_SWEEP_AGE_MS = 480_000; // 8 minutes
     private const long EVENT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long event signals stay valid
-    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when event signals present
+    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when generic event signals present
+    private const double MODE_B_LIQ_BOOST = 0.10; // reduce rev threshold by this when liquidation cluster is active
+    private const double MODE_B_LIQ_COMBO_BOOST = 0.15; // reduce rev threshold by this when liq cluster + absorption/exhaustion both active
+    private const long LIQ_CLUSTER_TTL_MS = 300_000; // 5 minutes — liquidation clusters live longer than generic events
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -64,6 +67,10 @@ public static class PolicyEngine
     private static long _lastSweepMs; // timestamp of last sweep
     private static string _lastEventType = ""; // most recent EventGrammar signal
     private static long _lastEventTimestamp; // when it fired
+    private static string _lastLiqType = ""; // most recent liquidation cluster direction
+    private static long _lastLiqTimestamp; // when the liquidation cluster fired
+    private static double _liqClusterScore; // 0.0–1.0 severity score
+    private static bool _liqHadCompanion; // true if absorption/exhaustion was also active when liq fired
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -81,6 +88,10 @@ public static class PolicyEngine
         _recentVelocities.Clear();
         _patternSimHistory.Clear();
         _entryReasons.Clear();
+        _lastLiqType = "";
+        _lastLiqTimestamp = 0;
+        _liqClusterScore = 0;
+        _liqHadCompanion = false;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
@@ -109,6 +120,31 @@ public static class PolicyEngine
             _lastEventType = evt.Type;
             _lastEventTimestamp = evt.Timestamp;
         }
+        else if (evt.Type == "LiquidationCluster")
+        {
+            _lastLiqType = evt.Type;
+            _lastLiqTimestamp = evt.Timestamp;
+
+            // Parse score from context: "longs_stopped:0.85:5:32.0"
+            _liqClusterScore = ParseLiqScore(evt.Context);
+
+            // Check if a companion event (absorption/exhaustion) was recently active
+            _liqHadCompanion = _lastEventType != "" &&
+                evt.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
+        }
+    }
+
+    /// <summary>Parse liquidation cluster score from context string.</summary>
+    private static double ParseLiqScore(string context)
+    {
+        if (string.IsNullOrEmpty(context)) return 0.5;
+        var parts = context.Split(':');
+        if (parts.Length >= 2 && double.TryParse(parts[1],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double score))
+            return score;
+        return 0.5;
     }
 
     private static bool HasVelocityDirectionChanged()
@@ -253,11 +289,28 @@ public static class PolicyEngine
             bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
 
             // EventGrammar boost: recent absorption/exhaustion/reclaim lowers reversal threshold
-            bool eventSignalActive = _lastEventType != "" &&
+            bool genericEventActive = _lastEventType != "" &&
                 state.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
-            double effectiveRevThreshold = eventSignalActive
-                ? MODE_B_REVERSAL_THRESHOLD - MODE_B_EVENT_BOOST
-                : MODE_B_REVERSAL_THRESHOLD;
+
+            // Liquidation cluster: tracked separately with longer TTL and its own score
+            bool liqActive = _lastLiqType != "" &&
+                state.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
+
+            // Combo: liquidation cluster + companion (absorption or exhaustion) = strongest signal
+            bool liqComboActive = liqActive && _liqHadCompanion &&
+                state.Timestamp - _lastEventTimestamp <= LIQ_CLUSTER_TTL_MS;
+
+            // Strong standalone liquidation (score >= 0.7) also counts
+            bool liqStrongStandalone = liqActive && _liqClusterScore >= 0.7;
+
+            double effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD;
+
+            if (liqComboActive)
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_COMBO_BOOST; // 0.32 - 0.15 = 0.17
+            else if (liqStrongStandalone)
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_BOOST; // 0.32 - 0.10 = 0.22
+            else if (genericEventActive)
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_EVENT_BOOST; // 0.32 - 0.07 = 0.25
 
             if (rev >= effectiveRevThreshold && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {

@@ -2,6 +2,7 @@ using CEPx.Core;
 using CEPx.Pipeline;
 using CEPx.Policy;
 using CEPx.Scoring;
+using CEPx.EventGrammar;
 
 // ── Multi-day test dates (add/remove as needed) ──
 var testDates = new[] {
@@ -59,6 +60,20 @@ static DayResult RunDay(int year, int month, int day)
     var ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000, startMs: startUTC, endMs: endUTC);
     if (ticks.Length < 100) ticks = PipelineFunctions.FetchBinanceHistorical("BTCUSDT", "1m", 1000);
 
+    // Fetch liquidations for the same time window
+    // DEBUG_LIQ: Temporary logging to assess liquidation data quality. Remove after analysis.
+    LiquidationEvent[] liquidations;
+    try { liquidations = PipelineFunctions.FetchLiquidations("BTCUSDT", 1000, startMs: startUTC, endMs: endUTC); }
+    catch (Exception ex) { Console.WriteLine($"[DEBUG_LIQ] Fetch failed: {ex.Message}"); liquidations = Array.Empty<LiquidationEvent>(); }
+
+    // DEBUG_LIQ: Per-day summary
+    int liqLongCount = liquidations.Count(l => l.IsLongLiquidation);
+    int liqShortCount = liquidations.Count(l => l.IsShortLiquidation);
+    double liqAvgQty = liquidations.Length > 0 ? liquidations.Average(l => l.Quantity) : 0;
+    double liqMaxQty = liquidations.Length > 0 ? liquidations.Max(l => l.Quantity) : 0;
+    Console.WriteLine($"[DEBUG_LIQ] Day summary: {liquidations.Length} total | long={liqLongCount} short={liqShortCount} | avgQty={liqAvgQty:F1} maxQty={liqMaxQty:F1}");
+    // END DEBUG_LIQ
+
     Console.WriteLine($"\n=== {dateLabel} — {ticks.Length} candles ===");
 
     PolicyEngine.Reset();
@@ -86,6 +101,12 @@ static DayResult RunDay(int year, int month, int day)
             if (absorption != null) PolicyEngine.RecordEvent(absorption.Value);
             var exhaustion = PipelineFunctions.DetectExhaustionPulse(w10);
             if (exhaustion != null) PolicyEngine.RecordEvent(exhaustion.Value);
+
+            // Liquidation cluster check
+            var liqCluster = LiquidationClusterDetector.Detect(
+                w10, liquidations, pendingSweepOrigin, pendingSweepIsBullish,
+                ticks[i].Timestamp - 600_000, ticks[i].Timestamp);
+            if (liqCluster != null) PolicyEngine.RecordEvent(liqCluster.Value);
         }
 
         // ── Exit check when in position ──

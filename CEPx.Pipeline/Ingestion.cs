@@ -209,4 +209,54 @@ public static partial class PipelineFunctions
         }
         return result.ToArray();
     }
+
+    /// <summary>Fetch liquidation orders from Binance Futures.</summary>
+    // DEBUG_LIQ: Temporary logging to assess liquidation data quality. Remove after analysis.
+    public static LiquidationEvent[] FetchLiquidations(string symbol = "BTCUSDT", int limit = 1000, long startMs = 0, long endMs = 0)
+    {
+        using var http = new HttpClient();
+        var url = $"https://fapi.binance.com/fapi/v1/allForceOrders?symbol={symbol}&limit={limit}";
+        if (startMs > 0) url += $"&startTime={startMs}";
+        if (endMs > 0) url += $"&endTime={endMs}";
+
+        // DEBUG_LIQ: Log the request
+        var startDt = DateTimeOffset.FromUnixTimeMilliseconds(startMs).UtcDateTime;
+        var endDt = DateTimeOffset.FromUnixTimeMilliseconds(endMs).UtcDateTime;
+        Console.WriteLine($"[DEBUG_LIQ] Fetching liquidations: {startDt:yyyy-MM-dd HH:mm} → {endDt:yyyy-MM-dd HH:mm}");
+
+        var json = http.GetStringAsync(url).Result;
+        using var doc = JsonDocument.Parse(json);
+        var rows = doc.RootElement.EnumerateArray();
+        var result = new List<LiquidationEvent>();
+
+        foreach (var row in rows)
+        {
+            long ts = row.GetProperty("time").GetInt64();
+            string sym = row.GetProperty("symbol").GetString()!;
+            double price = double.Parse(row.GetProperty("price").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+            double qty = double.Parse(row.GetProperty("origQty").GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+            string side = row.GetProperty("side").GetString()!;
+            string type = row.GetProperty("type").GetString()!;
+            result.Add(new LiquidationEvent(ts, sym, price, qty, side, type));
+        }
+
+        // DEBUG_LIQ: Log summary stats
+        int longLiqs = result.Count(l => l.IsLongLiquidation);
+        int shortLiqs = result.Count(l => l.IsShortLiquidation);
+        double totalLongQty = result.Where(l => l.IsLongLiquidation).Sum(l => l.Quantity);
+        double totalShortQty = result.Where(l => l.IsShortLiquidation).Sum(l => l.Quantity);
+        Console.WriteLine($"[DEBUG_LIQ] Received {result.Count} liquidations | Long: {longLiqs} ({totalLongQty:F1} qty) | Short: {shortLiqs} ({totalShortQty:F1} qty)");
+
+        // DEBUG_LIQ: Print first 5 as sample
+        for (int i = 0; i < Math.Min(5, result.Count); i++)
+        {
+            var l = result[i];
+            var ldt = DateTimeOffset.FromUnixTimeMilliseconds(l.Timestamp).UtcDateTime;
+            Console.WriteLine($"[DEBUG_LIQ]   #{i+1} {ldt:HH:mm:ss} {l.Side} {l.Price:F2} qty={l.Quantity:F1} type={l.Type}");
+        }
+        if (result.Count > 5) Console.WriteLine($"[DEBUG_LIQ]   ... and {result.Count - 5} more");
+        // END DEBUG_LIQ
+
+        return result.ToArray();
+    }
 }

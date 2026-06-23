@@ -2,8 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CEPx.Pipeline\CEPx.Pipeline.csproj" />
+    <ProjectReference Include="..\CEPx.Policy\CEPx.Policy.csproj" />
     <ProjectReference Include="..\CEPx.Blackboard\CEPx.Blackboard.csproj" />
     <ProjectReference Include="..\CEPx.Scoring\CEPx.Scoring.csproj" />
+    <ProjectReference Include="..\CEPx.EventGrammar\CEPx.EventGrammar.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
