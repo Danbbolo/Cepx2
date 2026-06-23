@@ -254,4 +254,114 @@ public static class ScoringEngine
         var score = ScoreEvent(synth, window);
         return WriteState(score, window);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ── NEW: Market-structure scoring path ────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Score using the new market-structure layer. Runs Kalman filter for velocity,
+    /// calls StructureScorers.ScoreMarket() for convictions, then detects regime.
+    /// Returns a fully populated MarketStructureScore.
+    /// </summary>
+    public static MarketStructureScore ScoreMarket(
+        MarketEvent[] window, ActiveEventSnapshot events, ScoringConfig? config = null)
+    {
+        // ── Kalman filter for velocity context ────────────────────
+        double vel = 0;
+        if (window.Length > 0)
+        {
+            var synth = new CepEvent(window[^1].Timestamp, window[^1].Symbol,
+                "SweepStart", window[^1].Price, events.IsBullishSweep ? "bullish" : "bearish");
+            var kalman = ScoreWithKalman(synth, window);
+            vel = kalman.StateVelocity;
+        }
+
+        // If snapshot doesn't have velocity, inject Kalman result
+        var eventsWithVel = events.KalmanVelocity == 0 && vel != 0
+            ? new ActiveEventSnapshot(events.SweepOrigin, events.IsBullishSweep,
+                vel, events.DailyAvgVolume, events.Reclaim, events.Exhaustion,
+                events.Absorption, events.LiquidationCluster,
+                events.MomentumPersistence, events.CleanContinuation)
+            : events;
+
+        // ── Call structure scorers ────────────────────────────────
+        var msScore = StructureScorers.ScoreMarket(window, eventsWithVel, config);
+
+        // ── Regime detection (same logic as WriteState) ───────────
+        var (regime, regimeConf) = DetectRegime(window);
+
+        // ── Return with Kalman + regime populated ─────────────────
+        return new MarketStructureScore(
+            msScore.Timestamp, msScore.Symbol,
+            vel, vel, 0, 0,
+            regime, regimeConf,
+            msScore.ContinuationConviction, msScore.ReversalConviction,
+            msScore.ActiveStructures,
+            msScore.SweepReclaimScore, msScore.BreakoutFailScore,
+            msScore.ExhaustionScore, msScore.AbsorptionScore,
+            msScore.LiqClusterScore, msScore.MomentumPersistScore,
+            msScore.CleanContScore, msScore.PullbackResumeScore,
+            msScore.LowLiquidityRejectScore);
+    }
+
+    /// <summary>
+    /// Convert a MarketStructureScore into BlackboardState.
+    /// Uses the same regime detection as the old WriteState.
+    /// </summary>
+    public static BlackboardState WriteState(MarketStructureScore score, MarketEvent[] window)
+    {
+        var (regime, regimeConf) = DetectRegime(window);
+
+        return new BlackboardState(
+            score.Timestamp,
+            score.Symbol,
+            score.ActiveStructures != StructureFlags.None,  // SweepActive if any structure
+            score.PatternFamily,
+            score.PatternSimilarity,       // → ContinuationConviction
+            score.ReversalSimilarity,      // → ReversalConviction
+            score.StateVelocity,
+            score.UncertaintyUpper,
+            score.UncertaintyLower,
+            score.AnomalyScore,
+            string.IsNullOrEmpty(score.Regime) ? regime : score.Regime,
+            score.RegimeConfidence > 0 ? score.RegimeConfidence : regimeConf,
+            "hold"
+        );
+    }
+
+    /// <summary>
+    /// Produce a fresh BlackboardState using the new market-structure scoring path.
+    /// Replaces the old RefreshState() that used DTW.
+    /// </summary>
+    public static BlackboardState RefreshState(
+        MarketEvent[] window, ActiveEventSnapshot events, ScoringConfig? config = null)
+    {
+        var score = ScoreMarket(window, events, config);
+        return WriteState(score, window);
+    }
+
+    /// <summary>
+    /// Regime detection: uptrend if ≥7/10 ticks up, downtrend if ≤3/10, else chop.
+    /// </summary>
+    public static (string regime, double confidence) DetectRegime(MarketEvent[] window)
+    {
+        int positiveDeltas = 0, totalDeltas = 0;
+        int evalCount = Math.Min(window.Length, 10);
+        int start = window.Length - evalCount;
+        for (int i = start + 1; i < window.Length; i++)
+        {
+            if (window[i].Price > window[i - 1].Price) positiveDeltas++;
+            totalDeltas++;
+        }
+        string regime;
+        if (positiveDeltas >= 7) regime = "uptrend";
+        else if (positiveDeltas <= 3) regime = "downtrend";
+        else regime = "chop";
+
+        double confidence = totalDeltas > 0
+            ? Math.Max(positiveDeltas, totalDeltas - positiveDeltas) / (double)totalDeltas
+            : 0.0;
+        return (regime, confidence);
+    }
 }

@@ -99,6 +99,14 @@ static DayResult RunDay(int year, int month, int day)
     Console.WriteLine($"[DEBUG_LIQ] Day summary: {liquidations.Length} total | long={liqLongCount} short={liqShortCount} | avgQty={liqAvgQty:F1} maxQty={liqMaxQty:F1}");
     // END DEBUG_LIQ
 
+    // ── Compute daily average volume (first 100 candles, for LowLiquidityReject) ──
+    double dailyAvgVolume = 0;
+    if (ticks.Length > 0)
+    {
+        int volSample = Math.Min(100, ticks.Length);
+        dailyAvgVolume = ticks.Take(volSample).Average(t => t.Volume);
+    }
+
     Console.WriteLine($"\n=== {dateLabel} — {ticks.Length} candles ===");
 
     PolicyEngine.Reset();
@@ -150,7 +158,11 @@ static DayResult RunDay(int year, int month, int day)
             if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
             {
                 PolicyEngine.DiagReEvalAttempts++;
-                var freshState = ScoringEngine.RefreshState(w10, pendingSweepIsBullish);
+                // Build ActiveEventSnapshot from current TTL state
+                var snapshot = PolicyEngine.SnapshotActiveEvents(
+                    ticks[i].Timestamp, pendingSweepOrigin, pendingSweepIsBullish,
+                    0, dailyAvgVolume);
+                var freshState = ScoringEngine.RefreshState(w10, snapshot);
                 PolicyEngine.UpdateCandidate(freshState,
                     exhaustion != null, absorption != null, reclaim != null,
                     momPer != null, noAbs != null);
@@ -174,8 +186,10 @@ static DayResult RunDay(int year, int month, int day)
         {
             var w10 = new MarketEvent[10];
             for (int j = 0; j < 10; j++) w10[j] = buf[(i - 9 + j) % 10];
-            var exitSweep = new CepEvent(ticks[i].Timestamp, "BTCUSDT", "SweepStart", ticks[i].Price, "");
-            var exitScore = ScoringEngine.ScoreEvent(exitSweep, w10);
+            // Use market-structure scoring with empty event snapshot for exit
+            var exitSnapshot = new ActiveEventSnapshot(
+                PolicyEngine.EntryPrice, PolicyEngine.PositionSide == "long", 0, dailyAvgVolume);
+            var exitScore = ScoringEngine.ScoreMarket(w10, exitSnapshot);
             var exitState = ScoringEngine.WriteState(exitScore, w10);
             PolicyEngine.RecordPatternSimilarity(exitState.PatternSimilarity);
             var exitDecision = PolicyEngine.Decide(exitState, i, ticks[i].Price);
@@ -198,7 +212,10 @@ static DayResult RunDay(int year, int month, int day)
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
         for (int j = 0; j < 10; j++) scoreW10[j] = buf[(i - 9 + j) % 10];
-        var score = ScoringEngine.ScoreEvent(sweep.Value, scoreW10);
+        // Use market-structure scoring with empty event snapshot (sweep just detected)
+        var initSnapshot = new ActiveEventSnapshot(
+            pendingSweepOrigin, pendingSweepIsBullish, 0, dailyAvgVolume);
+        var score = ScoringEngine.ScoreMarket(scoreW10, initSnapshot);
         var state = ScoringEngine.WriteState(score, scoreW10);
 
         double sweepOrigin = w5[0].Price;

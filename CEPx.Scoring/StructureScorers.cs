@@ -688,6 +688,116 @@ public static class StructureScorers
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ── Aggregation: ScoreMarket ─────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Main scoring entry point. Calls all 9 structure scorers with the
+    /// current window and active event state, then aggregates into
+    /// ContinuationConviction and ReversalConviction via weighted sum.
+    ///
+    /// Returns a fully populated MarketStructureScore ready for BlackboardState conversion.
+    /// </summary>
+    public static MarketStructureScore ScoreMarket(
+        MarketEvent[] priceWindow,
+        ActiveEventSnapshot events,
+        ScoringConfig? config = null)
+    {
+        var cfg = config ?? new ScoringConfig();
+
+        // ── Call all 9 scorers ────────────────────────────────────
+
+        // Reversal scorers
+        double sweepReclaimScore = ScoreSweepReclaim(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, events.Reclaim, cfg);
+
+        double breakoutFailScore = ScoreBreakoutFail(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, cfg);
+
+        double exhaustionScore = ScoreExhaustion(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, events.Exhaustion, cfg);
+
+        double absorptionScore = ScoreAbsorption(priceWindow,
+            events.SweepOrigin, events.Absorption, cfg);
+
+        double liqClusterScore = ScoreLiquidationCluster(events.LiquidationCluster);
+
+        // Continuation scorers
+        double momentumPersistScore = ScoreMomentumPersistence(priceWindow,
+            events.KalmanVelocity, events.MomentumPersistence, cfg);
+
+        double cleanContScore = ScoreCleanContinuation(priceWindow,
+            events.CleanContinuation, cfg);
+
+        double pullbackResumeScore = ScorePullbackResume(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, cfg);
+
+        // Direction-agnostic
+        double lowLiqRejectScore = ScoreLowLiquidityReject(priceWindow,
+            events.SweepOrigin, events.IsBullishSweep, events.DailyAvgVolume, cfg);
+
+        // ── Determine active structures ───────────────────────────
+        StructureFlags flags = StructureFlags.None;
+        if (sweepReclaimScore > 0)    flags |= StructureFlags.SweepReclaim;
+        if (breakoutFailScore > 0)    flags |= StructureFlags.BreakoutFail;
+        if (exhaustionScore > 0)      flags |= StructureFlags.Exhaustion;
+        if (absorptionScore > 0)      flags |= StructureFlags.Absorption;
+        if (liqClusterScore > 0)      flags |= StructureFlags.LiquidationCluster;
+        if (momentumPersistScore > 0) flags |= StructureFlags.MomentumPersistence;
+        if (cleanContScore > 0)       flags |= StructureFlags.CleanContinuation;
+        if (pullbackResumeScore > 0)  flags |= StructureFlags.PullbackResume;
+        if (lowLiqRejectScore > 0)    flags |= StructureFlags.LowLiquidityReject;
+
+        // ── Compute directional convictions ───────────────────────
+
+        // Continuation conviction: weighted sum of cont structures
+        double contConviction = Clamp01(
+            momentumPersistScore * cfg.MomentumPersistenceWeight +
+            cleanContScore * cfg.CleanContinuationWeight +
+            pullbackResumeScore * cfg.PullbackResumeWeight);
+
+        // Reversal conviction: weighted sum of rev structures
+        double revConviction = Clamp01(
+            sweepReclaimScore * cfg.SweepReclaimWeight +
+            exhaustionScore * cfg.ExhaustionWeight +
+            absorptionScore * cfg.AbsorptionWeight +
+            liqClusterScore * cfg.LiqClusterWeight +
+            breakoutFailScore * cfg.BreakoutFailWeight);
+
+        // Combo bonus: ≥ 2 reversal structures active
+        int revActiveCount = (sweepReclaimScore > 0 ? 1 : 0)
+                           + (breakoutFailScore > 0 ? 1 : 0)
+                           + (exhaustionScore > 0 ? 1 : 0)
+                           + (absorptionScore > 0 ? 1 : 0)
+                           + (liqClusterScore > 0 ? 1 : 0);
+        if (revActiveCount >= 2)
+            revConviction = Clamp01(revConviction + cfg.ComboBonus);
+
+        // ── Build and return ──────────────────────────────────────
+        return new MarketStructureScore(
+            timestamp: priceWindow.Length > 0 ? priceWindow[^1].Timestamp : 0,
+            symbol: priceWindow.Length > 0 ? priceWindow[^1].Symbol : "",
+            stateMean: 0,
+            stateVelocity: events.KalmanVelocity,
+            uncertaintyUpper: 0,
+            uncertaintyLower: 0,
+            regime: "",           // filled by WriteState
+            regimeConfidence: 0,  // filled by WriteState
+            continuationConviction: contConviction,
+            reversalConviction: revConviction,
+            activeStructures: flags,
+            sweepReclaimScore: sweepReclaimScore,
+            breakoutFailScore: breakoutFailScore,
+            exhaustionScore: exhaustionScore,
+            absorptionScore: absorptionScore,
+            liqClusterScore: liqClusterScore,
+            momentumPersistScore: momentumPersistScore,
+            cleanContScore: cleanContScore,
+            pullbackResumeScore: pullbackResumeScore,
+            lowLiquidityRejectScore: lowLiqRejectScore);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // ── Utility ──────────────────────────────────────────────────
     // ═══════════════════════════════════════════════════════════════
 

@@ -501,6 +501,48 @@ public static class PolicyEngine
     private static double Clamp(double value, double min, double max) =>
         value < min ? min : value > max ? max : value;
 
+    /// <summary>
+    /// Snapshot the currently TTL-active event signals for scoring.
+    /// Checks timestamps against TTL windows and returns only active events.
+    /// </summary>
+    public static ActiveEventSnapshot SnapshotActiveEvents(
+        long nowMs, double sweepOrigin, bool isBullish, double kalmanVelocity, double dailyAvgVolume = 0)
+    {
+        // ── Reversal signals ──
+        CepEvent? reclaim = null;
+        if (_lastEventType == "Reclaim" && nowMs - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS)
+            reclaim = new CepEvent(_lastEventTimestamp, "BTCUSDT", "Reclaim", 0, "");
+
+        CepEvent? exhaustion = null;
+        if (_lastExhaustionType != "" && nowMs - _lastExhaustionTimestamp <= EVENT_SIGNAL_TTL_MS)
+            exhaustion = new CepEvent(_lastExhaustionTimestamp, "BTCUSDT", _lastExhaustionType, 0,
+                $"score:{_lastExhaustionScore:F2}");
+
+        CepEvent? absorption = null;
+        if (_lastEventType == "AbsorptionAfterSweep" && nowMs - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS)
+            absorption = new CepEvent(_lastEventTimestamp, "BTCUSDT", "AbsorptionAfterSweep", 0,
+                $"score:{_lastEventScore:F2}");
+
+        CepEvent? liqCluster = null;
+        if (_lastLiqType != "" && nowMs - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS)
+            liqCluster = new CepEvent(_lastLiqTimestamp, "BTCUSDT", "LiquidationCluster", 0,
+                $"liq:{_liqClusterScore:F2}");
+
+        // ── Continuation signals ──
+        CepEvent? momPer = null;
+        if (_lastMomPerType != "" && nowMs - _lastMomPerTimestamp <= CONT_SIGNAL_TTL_MS)
+            momPer = new CepEvent(_lastMomPerTimestamp, "BTCUSDT", "MomentumPersistence", 0,
+                $"score:{_lastMomPerScore:F2}");
+
+        CepEvent? cleanCont = null;
+        if (_lastNoAbsType != "" && nowMs - _lastNoAbsTimestamp <= CONT_SIGNAL_TTL_MS)
+            cleanCont = new CepEvent(_lastNoAbsTimestamp, "BTCUSDT", "NoMeaningfulAbsorption", 0,
+                $"score:{_lastNoAbsScore:F2}");
+
+        return new ActiveEventSnapshot(sweepOrigin, isBullish, kalmanVelocity, dailyAvgVolume,
+            reclaim, exhaustion, absorption, liqCluster, momPer, cleanCont);
+    }
+
     private static bool HasVelocityDirectionChanged()
     {
         int n = _recentVelocities.Count;
