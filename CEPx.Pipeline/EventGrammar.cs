@@ -63,7 +63,15 @@ public static partial class PipelineFunctions
         var prev = last5[3];
         double pct = Math.Abs(last.Price - prev.Price) / prev.Price * 100;
         if (pct >= 0.1) return null;
-        return new CepEvent(last.Timestamp, last.Symbol, "AbsorptionAfterSweep", last.Price, "");
+
+        // ── Score: volume intensity (60%) + price stability (40%) ──
+        double volRatio = last.Volume / avg; // 3x min, 8x+ = full
+        double volScore = Clamp01((volRatio - 3.0) / 5.0);  // 3x→0.0, 5.5x→0.5, 8x→1.0
+        double stabilityScore = Clamp01(1.0 - (pct / 0.1)); // 0.0%→1.0, 0.1%→0.0
+        double score = volScore * 0.60 + stabilityScore * 0.40;
+
+        string context = $"score:{score:F2}";
+        return new CepEvent(last.Timestamp, last.Symbol, "AbsorptionAfterSweep", last.Price, context);
     }
 
     public static CepEvent? DetectBreakoutAttempt(MarketEvent[] window)
@@ -94,7 +102,17 @@ public static partial class PipelineFunctions
         if (firstMovePct < 0.3) return null;
         if (firstMove * secondMove > 0) return null;
         if (Math.Abs(secondMove) < Math.Abs(firstMove) * 0.5) return null;
+
+        // ── Score: move magnitude (40%) + reversal strength (60%) ──
+        double magScore = Clamp01(firstMovePct / 1.0);    // 0.3%→0.3, 1.0%+→1.0
+        double revRatio = Math.Abs(secondMove) / Math.Abs(firstMove); // 0.5 min, 1.0 max
+        double revScore = Clamp01((revRatio - 0.5) / 0.5); // 0.5→0.0, 0.75→0.5, 1.0→1.0
+        double score = magScore * 0.40 + revScore * 0.60;
+
         var ctx = firstMove > 0 ? "bullish_exhaustion" : "bearish_exhaustion";
-        return new CepEvent(window[l - 1].Timestamp, window[l - 1].Symbol, "ExhaustionPulse", p5, ctx);
+        string context = $"{ctx}:score:{score:F2}";
+        return new CepEvent(window[l - 1].Timestamp, window[l - 1].Symbol, "ExhaustionPulse", p5, context);
     }
+
+    private static double Clamp01(double value) => Math.Max(0.0, Math.Min(1.0, value));
 }

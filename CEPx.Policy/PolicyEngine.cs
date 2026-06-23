@@ -34,10 +34,31 @@ public static class PolicyEngine
     private const int VELOCITY_HISTORY_TICKS = 5;
     private const long MODE_B_MAX_SWEEP_AGE_MS = 480_000; // 8 minutes
     private const long EVENT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long event signals stay valid
-    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when generic event signals present
-    private const double MODE_B_LIQ_BOOST = 0.10; // reduce rev threshold by this when liquidation cluster is active
-    private const double MODE_B_LIQ_COMBO_BOOST = 0.15; // reduce rev threshold by this when liq cluster + absorption/exhaustion both active
+    private const double MODE_B_EVENT_BOOST = 0.07; // reduce rev threshold by this when generic event signals present (legacy flat boost)
+    private const double MODE_B_EVENT_BOOST_MIN = 0.03; // minimum gradient boost for absorption/exhaustion
+    private const double MODE_B_EVENT_BOOST_MAX = 0.12; // maximum gradient boost for absorption/exhaustion
+    private const double MODE_B_LIQ_COMBO_BOOST = 0.15; // base combo boost when liq cluster + companion both active
     private const long LIQ_CLUSTER_TTL_MS = 300_000; // 5 minutes — liquidation clusters live longer than generic events
+    private const long CONT_SIGNAL_TTL_MS = 120_000; // 2 minutes — how long continuation signals stay valid
+
+    // ── Mode A continuation boost tiers (strongest → weakest) ────
+    // Tier 1: dual cont (MomentumPersistence + NoMeaningfulAbsorption both active)
+    private const double MODE_A_DUAL_BOOST_SCALE = 0.40;
+    private const double MODE_A_DUAL_BOOST_MIN = 0.10;
+    private const double MODE_A_DUAL_BOOST_MAX = 0.25;
+    // Tier 2: cont + trend-aligned regime
+    private const double MODE_A_TREND_BOOST_SCALE = 0.30;
+    private const double MODE_A_TREND_BOOST_MIN = 0.08;
+    private const double MODE_A_TREND_BOOST_MAX = 0.22;
+    private const double MODE_A_TREND_COMBO_FLAT = 0.05; // flat bonus for trend alignment
+    // Tier 3: cont + strong Kalman velocity
+    private const double MODE_A_VEL_BOOST_SCALE = 0.30;
+    private const double MODE_A_VEL_BOOST_MIN = 0.05;
+    private const double MODE_A_VEL_BOOST_MAX = 0.20;
+    // Tier 4: cont standalone (no favorable regime or velocity)
+    private const double MODE_A_SOLO_BOOST_SCALE = 0.25;
+    private const double MODE_A_SOLO_BOOST_MIN = 0.03;
+    private const double MODE_A_SOLO_BOOST_MAX = 0.18;
 
     public static bool InPosition;
     public static string PositionSide = "";
@@ -65,12 +86,23 @@ public static class PolicyEngine
     private static int _velocityFlipTicks; // tick fallback
     private static long _velocityFlipStartMs;
     private static long _lastSweepMs; // timestamp of last sweep
-    private static string _lastEventType = ""; // most recent EventGrammar signal
+    private static string _lastEventType = ""; // most recent EventGrammar signal (absorption/exhaustion/reclaim)
     private static long _lastEventTimestamp; // when it fired
+    private static double _lastEventScore; // 0.0–1.0 severity score for absorption/exhaustion
     private static string _lastLiqType = ""; // most recent liquidation cluster direction
     private static long _lastLiqTimestamp; // when the liquidation cluster fired
     private static double _liqClusterScore; // 0.0–1.0 severity score
     private static bool _liqHadCompanion; // true if absorption/exhaustion was also active when liq fired
+    private static bool _eventHadLiqCompanion; // true if liq cluster was active when absorption/exhaustion fired
+
+    // ── Continuation signal state (tracked separately per type) ──
+    private static string _lastMomPerType = ""; // "MomentumPersistence" or ""
+    private static long _lastMomPerTimestamp;
+    private static double _lastMomPerScore;
+    private static string _lastNoAbsType = ""; // "NoMeaningfulAbsorption" or ""
+    private static long _lastNoAbsTimestamp;
+    private static double _lastNoAbsScore;
+
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -92,6 +124,13 @@ public static class PolicyEngine
         _lastLiqTimestamp = 0;
         _liqClusterScore = 0;
         _liqHadCompanion = false;
+        _eventHadLiqCompanion = false;
+        _lastMomPerType = "";
+        _lastMomPerTimestamp = 0;
+        _lastMomPerScore = 0;
+        _lastNoAbsType = "";
+        _lastNoAbsTimestamp = 0;
+        _lastNoAbsScore = 0;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
@@ -119,6 +158,13 @@ public static class PolicyEngine
         {
             _lastEventType = evt.Type;
             _lastEventTimestamp = evt.Timestamp;
+
+            // Parse score from context: "score:0.72" or "bullish_exhaustion:score:0.65"
+            _lastEventScore = ParseEventScore(evt.Context);
+
+            // Check if a liq cluster was recently active → bidirectional combo
+            _eventHadLiqCompanion = _lastLiqType != "" &&
+                evt.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
         }
         else if (evt.Type == "LiquidationCluster")
         {
@@ -132,6 +178,34 @@ public static class PolicyEngine
             _liqHadCompanion = _lastEventType != "" &&
                 evt.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
         }
+        else if (evt.Type == "MomentumPersistence")
+        {
+            _lastMomPerType = evt.Type;
+            _lastMomPerTimestamp = evt.Timestamp;
+            _lastMomPerScore = ParseEventScore(evt.Context);
+        }
+        else if (evt.Type == "NoMeaningfulAbsorption")
+        {
+            _lastNoAbsType = evt.Type;
+            _lastNoAbsTimestamp = evt.Timestamp;
+            _lastNoAbsScore = ParseEventScore(evt.Context);
+        }
+    }
+
+    /// <summary>Parse event score from context string (format: "score:0.72" or "prefix:score:0.65").</summary>
+    private static double ParseEventScore(string context)
+    {
+        if (string.IsNullOrEmpty(context)) return 0.5;
+        // Find "score:" substring and parse the number after it
+        int idx = context.LastIndexOf("score:");
+        if (idx < 0) return 0.5;
+        string numPart = context.Substring(idx + 6).Split(':')[0];
+        if (double.TryParse(numPart,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double score))
+            return score;
+        return 0.5;
     }
 
     /// <summary>Parse liquidation cluster score from context string.</summary>
@@ -146,6 +220,9 @@ public static class PolicyEngine
             return score;
         return 0.5;
     }
+
+    private static double Clamp(double value, double min, double max) =>
+        value < min ? min : value > max ? max : value;
 
     private static bool HasVelocityDirectionChanged()
     {
@@ -267,9 +344,85 @@ public static class PolicyEngine
             string regime = state.Regime;
 
             // MODE A: Continuation (trend-aligned momentum)
+            // Multi-tier gradient boosting system — parallel to Mode B's 4-tier reversal logic.
+            // Each tier uses score-dependent velocity threshold relaxation.
+            //
+            // Tier 1: DUAL cont — MomentumPersistence + NoMeaningfulAbsorption both active
+            // Tier 2: Cont + trend — either cont signal + trend-aligned regime
+            // Tier 3: Cont + velocity — either cont signal + strong Kalman velocity
+            // Tier 4: Cont standalone — one cont signal, no favorable regime/velocity
+            // Tier 5: Classic — no cont signals, trend-aligned + velStrong (unchanged)
+
             bool trendAligned = (isBull && regime == "uptrend") || (!isBull && regime == "downtrend");
-            bool velStrong = (isBull && vel > ENTRY_VELOCITY_THRESHOLD) || (!isBull && vel < -ENTRY_VELOCITY_THRESHOLD);
-            if (trendAligned && velStrong && rev < 0.5)
+
+            // ── Check active continuation signals ────────────────
+            bool momPerActive = _lastMomPerType != "" &&
+                state.Timestamp - _lastMomPerTimestamp <= CONT_SIGNAL_TTL_MS;
+            bool noAbsActive = _lastNoAbsType != "" &&
+                state.Timestamp - _lastNoAbsTimestamp <= CONT_SIGNAL_TTL_MS;
+            bool dualContActive = momPerActive && noAbsActive;
+            bool anyContActive = momPerActive || noAbsActive;
+
+            // Best continuation score (max of whichever is active)
+            double contScore = 0;
+            if (momPerActive && noAbsActive)
+                contScore = (_lastMomPerScore + _lastNoAbsScore) / 2.0; // dual: average
+            else if (momPerActive)
+                contScore = _lastMomPerScore;
+            else if (noAbsActive)
+                contScore = _lastNoAbsScore;
+
+            // Kalman velocity companion: is velocity strong in sweep direction?
+            bool velStrong = (isBull && vel > ENTRY_VELOCITY_THRESHOLD)
+                          || (!isBull && vel < -ENTRY_VELOCITY_THRESHOLD);
+
+            // ── Compute effective velocity threshold by tier ─────
+            double effectiveVelThreshold = ENTRY_VELOCITY_THRESHOLD;
+            bool entryAllowed = false;
+
+            if (dualContActive)
+            {
+                // Tier 1: both signals active — strongest boost
+                double boost = Clamp(contScore * MODE_A_DUAL_BOOST_SCALE,
+                    MODE_A_DUAL_BOOST_MIN, MODE_A_DUAL_BOOST_MAX);
+                effectiveVelThreshold -= boost;
+                // Extra: if trend-aligned too, bonus reduction
+                if (trendAligned) effectiveVelThreshold -= 0.03;
+                entryAllowed = true;
+            }
+            else if (anyContActive && trendAligned)
+            {
+                // Tier 2: cont signal + favorable regime
+                double boost = Clamp(contScore * MODE_A_TREND_BOOST_SCALE,
+                    MODE_A_TREND_BOOST_MIN, MODE_A_TREND_BOOST_MAX);
+                effectiveVelThreshold -= (boost + MODE_A_TREND_COMBO_FLAT);
+                entryAllowed = true;
+            }
+            else if (anyContActive && velStrong)
+            {
+                // Tier 3: cont signal + strong Kalman velocity
+                double boost = Clamp(contScore * MODE_A_VEL_BOOST_SCALE,
+                    MODE_A_VEL_BOOST_MIN, MODE_A_VEL_BOOST_MAX);
+                effectiveVelThreshold -= boost;
+                entryAllowed = true;
+            }
+            else if (anyContActive)
+            {
+                // Tier 4: cont signal alone — weakest boost
+                double boost = Clamp(contScore * MODE_A_SOLO_BOOST_SCALE,
+                    MODE_A_SOLO_BOOST_MIN, MODE_A_SOLO_BOOST_MAX);
+                effectiveVelThreshold -= boost;
+                entryAllowed = true;
+            }
+            else
+            {
+                // Tier 5: classic — no cont signals, strict gate
+                entryAllowed = trendAligned;
+            }
+
+            bool velOk = (isBull && vel > effectiveVelThreshold) || (!isBull && vel < -effectiveVelThreshold);
+
+            if (entryAllowed && velOk && rev < 0.5)
             {
                 _entryStartMs = state.Timestamp;
                 string side = isBull ? "long" : "short";
@@ -288,29 +441,53 @@ public static class PolicyEngine
             bool revStrongerThanCont = rev > state.PatternSimilarity;
             bool anomalyLow = state.AnomalyScore < MODE_B_ANOMALY_MAX;
 
-            // EventGrammar boost: recent absorption/exhaustion/reclaim lowers reversal threshold
+            // ── EventGrammar boost for Mode B reversal threshold ──
+            // Three signal tiers with gradient scoring, ordered strongest→weakest:
+            //   1. Liq combo: liq cluster + absorption/exhaustion both active → biggest boost
+            //   2. Liq standalone: gradient boost = liqScore × 0.20, clamped [0.05, 0.15]
+            //   3. Event combo: absorption/exhaustion + liq active → stronger event boost
+            //   4. Event standalone: gradient boost = eventScore × 0.12, clamped [0.03, 0.12]
+
             bool genericEventActive = _lastEventType != "" &&
                 state.Timestamp - _lastEventTimestamp <= EVENT_SIGNAL_TTL_MS;
 
-            // Liquidation cluster: tracked separately with longer TTL and its own score
             bool liqActive = _lastLiqType != "" &&
                 state.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
 
-            // Combo: liquidation cluster + companion (absorption or exhaustion) = strongest signal
+            // Combo: liquidation cluster + companion → strongest signal
             bool liqComboActive = liqActive && _liqHadCompanion &&
                 state.Timestamp - _lastEventTimestamp <= LIQ_CLUSTER_TTL_MS;
 
-            // Strong standalone liquidation (score >= 0.7) also counts
-            bool liqStrongStandalone = liqActive && _liqClusterScore >= 0.7;
+            // Combo: absorption/exhaustion + liq cluster active → stronger event boost
+            bool eventComboActive = genericEventActive && _eventHadLiqCompanion &&
+                state.Timestamp - _lastLiqTimestamp <= LIQ_CLUSTER_TTL_MS;
 
             double effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD;
 
             if (liqComboActive)
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_COMBO_BOOST; // 0.32 - 0.15 = 0.17
-            else if (liqStrongStandalone)
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_BOOST; // 0.32 - 0.10 = 0.22
+            {
+                // Liq combo: base 0.15 + up to 0.05 extra for high-score clusters
+                double comboExtra = _liqClusterScore >= 0.85 ? 0.05 : 0.0;
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_LIQ_COMBO_BOOST - comboExtra;
+            }
+            else if (liqActive)
+            {
+                // Gradient boost: score 0.5→0.10, 0.7→0.14, 0.85→0.17, 1.0→0.20
+                double gradientBoost = Clamp(_liqClusterScore * 0.20, 0.05, 0.15);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost;
+            }
+            else if (eventComboActive)
+            {
+                // Event combo: base gradient + combo bonus of 0.04
+                double gradientBoost = Clamp(_lastEventScore * 0.12, MODE_B_EVENT_BOOST_MIN, MODE_B_EVENT_BOOST_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost - 0.04;
+            }
             else if (genericEventActive)
-                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - MODE_B_EVENT_BOOST; // 0.32 - 0.07 = 0.25
+            {
+                // Gradient boost: score 0.3→0.04, 0.5→0.06, 0.7→0.08, 1.0→0.12
+                double gradientBoost = Clamp(_lastEventScore * 0.12, MODE_B_EVENT_BOOST_MIN, MODE_B_EVENT_BOOST_MAX);
+                effectiveRevThreshold = MODE_B_REVERSAL_THRESHOLD - gradientBoost;
+            }
 
             if (rev >= effectiveRevThreshold && velExhausted && revRegimeOk && sweepRecent && revStrongerThanCont && anomalyLow)
             {

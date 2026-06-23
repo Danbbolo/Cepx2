@@ -197,7 +197,7 @@ public class EventGrammarTests
         var result = PipelineFunctions.DetectExhaustionPulse(window);
         Assert.NotNull(result);
         Assert.Equal("ExhaustionPulse", result.Value.Type);
-        Assert.Equal("bullish_exhaustion", result.Value.Context);
+        Assert.StartsWith("bullish_exhaustion", result.Value.Context);
     }
 
     [Fact]
