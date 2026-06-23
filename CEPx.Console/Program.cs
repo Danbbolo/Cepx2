@@ -313,11 +313,14 @@ static DayResult RunDay(int year, int month, int day)
             continue;
         }
 
-        // Track sweep for post-sweep detectors — time-based window
-        pendingSweepOrigin = w5[0].Price;
-        pendingSweepIsBullish = sweep.Value.Context == "bullish";
-        postSweepEndMs = sweep.Value.Timestamp + POST_SWEEP_WINDOW_MS;
-        postSweepEndTick = i + 10; // ~10 minutes on 1m candles
+        // Track sweep for post-sweep detectors — don't overwrite non-sweep candidate
+        if (!PolicyEngine.HasActiveCandidate)
+        {
+            pendingSweepOrigin = w5[0].Price;
+            pendingSweepIsBullish = sweep.Value.Context == "bullish";
+            postSweepEndMs = sweep.Value.Timestamp + POST_SWEEP_WINDOW_MS;
+            postSweepEndTick = i + 10; // ~10 minutes on 1m candles
+        }
 
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
