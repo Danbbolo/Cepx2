@@ -307,12 +307,14 @@ public static class PolicyEngine
 
         // ── Prototype discrimination record ─────────────────────
         double conflictOverlap = Math.Min(peakCont, peakRev) / Math.Max(Math.Max(peakCont, peakRev), 0.001);
+        string protoOutcome = decision.Action == "enter" ? decision.Reason : "noop";
+        string protoReason = decision.Action == "noop" ? decision.Reason : "";
         ProtoDiag.RecordCandidate((int)_candidateCreatedTick,
             peakCont, avgCont, contPersistRatio,
             peakRev, avgRev, revPersistRatio,
             conflictOverlap,
             revSigTotal, contSigTotal,
-            decision.Action, decision.Action == "noop" ? decision.Reason : "");
+            protoOutcome, protoReason);
         // END PROTODIAG
 
         return decision;
