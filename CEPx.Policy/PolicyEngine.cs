@@ -179,6 +179,12 @@ public static class PolicyEngine
     private static double _candidateBestRevScore;
     private static double _candidateBestVel;
     private static string _candidateBestRegime = "";
+    // Coherence scoring: aggregates instead of just peaks
+    private static double _candidateContSum;
+    private static double _candidateRevSum;
+    private static int _candidateUpdateCount;
+    private static int _candidateContPersist;  // updates where cont >= 0.35
+    private static int _candidateRevPersist;   // updates where rev >= 0.25
     private static int _candidateExhaustionCount;
     private static int _candidateAbsorptionCount;
     private static int _candidateReclaimCount;
@@ -199,6 +205,11 @@ public static class PolicyEngine
         _candidateBestRevScore = state.ReversalScore;
         _candidateBestVel = state.KalmanVelocity;
         _candidateBestRegime = state.Regime;
+        _candidateContSum = state.PatternSimilarity;
+        _candidateRevSum = state.ReversalScore;
+        _candidateUpdateCount = 1;
+        _candidateContPersist = state.PatternSimilarity >= 0.35 ? 1 : 0;
+        _candidateRevPersist = state.ReversalScore >= 0.25 ? 1 : 0;
         _candidateExhaustionCount = 0;
         _candidateAbsorptionCount = 0;
         _candidateReclaimCount = 0;
@@ -213,10 +224,17 @@ public static class PolicyEngine
     public static void UpdateCandidate(BlackboardState freshState, bool exhaustionFired, bool absorptionFired, bool reclaimFired, bool momPerFired, bool noAbsFired)
     {
         if (!_candidateActive) return;
-        if (freshState.PatternSimilarity > _candidateBestContSim) _candidateBestContSim = freshState.PatternSimilarity;
-        if (freshState.ReversalScore > _candidateBestRevScore) _candidateBestRevScore = freshState.ReversalScore;
+        double cont = freshState.PatternSimilarity;
+        double rev = freshState.ReversalScore;
+        if (cont > _candidateBestContSim) _candidateBestContSim = cont;
+        if (rev > _candidateBestRevScore) _candidateBestRevScore = rev;
         _candidateBestVel = freshState.KalmanVelocity;
         _candidateBestRegime = freshState.Regime;
+        _candidateContSum += cont;
+        _candidateRevSum += rev;
+        _candidateUpdateCount++;
+        if (cont >= 0.35) _candidateContPersist++;
+        if (rev >= 0.25) _candidateRevPersist++;
         if (exhaustionFired) _candidateExhaustionCount++;
         if (absorptionFired) _candidateAbsorptionCount++;
         if (reclaimFired) _candidateReclaimCount++;
@@ -231,48 +249,58 @@ public static class PolicyEngine
         if (InPosition) { _candidateActive = false; return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0); }
         _candidateActive = false;
         _candidateFinalized = true;
-        // Build synthetic BlackboardState from best evidence
+
+        // ── Coherence scoring ───────────────────────────────────
+        int n = _candidateUpdateCount;
+        double avgCont = n > 0 ? _candidateContSum / n : 0;
+        double avgRev = n > 0 ? _candidateRevSum / n : 0;
+        double peakCont = _candidateBestContSim;
+        double peakRev = _candidateBestRevScore;
+
+        // Persistence: how consistently were scores above threshold?
+        double contPersistRatio = n > 0 ? (double)_candidateContPersist / n : 0;
+        double revPersistRatio = n > 0 ? (double)_candidateRevPersist / n : 0;
+        double contPersistenceBonus = Math.Min(contPersistRatio * 1.5, 0.3);
+        double revPersistenceBonus = Math.Min(revPersistRatio * 1.5, 0.3);
+
+        // Conflict penalty: both cont and rev are high → neither direction is clear
+        bool bothStrong = peakCont >= 0.40 && peakRev >= 0.30;
+        double conflictPenalty = bothStrong ? 0.12 : 0.0;
+
+        // Effective scores: 60% peak + 30% average + 10% persistence - conflict
+        double effectiveCont = (peakCont * 0.60 + avgCont * 0.30 + contPersistenceBonus) - conflictPenalty;
+        double effectiveRev  = (peakRev  * 0.60 + avgRev  * 0.30 + revPersistenceBonus)  - conflictPenalty;
+
+        // Signal agreement bonus: reversal signals fire AND rev is consistently high
+        int revSigTotal = _candidateExhaustionCount + _candidateAbsorptionCount + _candidateReclaimCount;
+        bool reversalSignalsStrong = revSigTotal >= 3 && revPersistRatio >= 0.5;
+        if (reversalSignalsStrong) effectiveRev += 0.05;
+
+        int contSigTotal = _candidateMomPerCount + _candidateNoAbsCount;
+        bool contSignalsStrong = contSigTotal >= 3 && contPersistRatio >= 0.5;
+        if (contSignalsStrong) effectiveCont += 0.05;
+
+        effectiveCont = Math.Max(0, Math.Min(1.0, effectiveCont));
+        effectiveRev = Math.Max(0, Math.Min(1.0, effectiveRev));
+
+        // ── Build BlackboardState with effective scores ──────────
         var state = new BlackboardState(
             0, "BTCUSDT", true, "sweep",
-            _candidateBestContSim, _candidateBestRevScore, _candidateBestVel,
+            effectiveCont, effectiveRev, _candidateBestVel,
             0, 0, 0, _candidateBestRegime, 0.5, "hold");
 
-        // Re-use existing Decide logic for both modes
         var decision = Decide(state, tick, price, _candidateSweepOrigin, _candidateIsBullish);
 
-        if (decision.Action == "enter")
-        {
-            _candidateOutcome = decision.Reason;
-            return decision;
-        }
+        // ── Diagnostic output ────────────────────────────────────
+        Console.WriteLine($"[CANDIDATE] tick={_candidateCreatedTick} " +
+            $"peak(cont={peakCont:F3} rev={peakRev:F3}) avg(cont={avgCont:F3} rev={avgRev:F3}) " +
+            $"persist(cont={contPersistRatio:F2} rev={revPersistRatio:F2}) " +
+            $"conflict={bothStrong} signals(rev={revSigTotal} cont={contSigTotal}) " +
+            $"eff(cont={effectiveCont:F3} rev={effectiveRev:F3}) " +
+            $"vel={_candidateBestVel:F1} regime={_candidateBestRegime} " +
+            $"outcome={decision.Action} reason={decision.Reason}");
 
-        // Diagnose rejection reason
-        double rev = _candidateBestRevScore;
-        double cont = _candidateBestContSim;
-        bool revHi = rev >= 0.5;
-        bool velExhausted = HasVelocityDirectionChanged() || Math.Abs(_candidateBestVel) < 0.1
-            || (_candidateIsBullish && _candidateBestVel < 0) || (!_candidateIsBullish && _candidateBestVel > 0);
-
-        if (revHi && !velExhausted)
-            _candidateReject = "no_mans_land";
-        else if (revHi)
-            _candidateReject = "rev_too_high_for_A_but_vel_ok";
-        else if (!velExhausted)
-            _candidateReject = "vel_not_exhausted";
-        else if (rev < 0.32)
-            _candidateReject = "rev_too_low";
-        else
-            _candidateReject = "gate_combo_fail";
-
-        _candidateOutcome = "no_trade";
-
-        // DIAG output
-        Console.WriteLine($"[CANDIDATE] tick={_candidateCreatedTick} cont={_candidateBestContSim:F3} rev={_candidateBestRevScore:F3} " +
-            $"vel={_candidateBestVel:F1} regime={_candidateBestRegime} exh={_candidateExhaustionCount} abs={_candidateAbsorptionCount} " +
-            $"rec={_candidateReclaimCount} mom={_candidateMomPerCount} noa={_candidateNoAbsCount} " +
-            $"outcome={_candidateOutcome} reject={_candidateReject}");
-
-        return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0);
+        return decision;
     }
 
     private static readonly List<double> _recentVelocities = new();
