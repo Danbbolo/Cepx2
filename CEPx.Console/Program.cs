@@ -185,11 +185,9 @@ static DayResult RunDay(int year, int month, int day)
             if (stopHunt != null) PolicyEngine.RecordEvent(stopHunt.Value);
             // END PHASE B
 
-            // ── Any reversal signal → update candidate evidence only ──
-            if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
+            // ── Re-evaluate candidate: always during monitoring window ──
             {
                 PolicyEngine.DiagReEvalAttempts++;
-                // Build ActiveEventSnapshot from current TTL state + trackers
                 var snapshot = PolicyEngine.SnapshotActiveEvents(
                     ticks[i].Timestamp, pendingSweepOrigin, pendingSweepIsBullish,
                     0, volTracker.DailyAvgVolume, volTracker.RecentAvgVolume,
@@ -329,7 +327,8 @@ static DayResult RunDay(int year, int month, int day)
         bool isBullish = sweep.Value.Context == "bullish";
 
         // Create candidate — defer entry decision to post-sweep window close
-        if (!PolicyEngine.InPosition)
+        // Don't overwrite an existing non-sweep candidate
+        if (!PolicyEngine.InPosition && !PolicyEngine.HasActiveCandidate)
             PolicyEngine.CreateCandidate(i, postSweepEndTick, sweepOrigin, isBullish, state);
     }
 
