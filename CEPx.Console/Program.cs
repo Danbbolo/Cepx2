@@ -110,6 +110,7 @@ static DayResult RunDay(int year, int month, int day)
     double pendingSweepOrigin = 0;
     bool pendingSweepIsBullish = false;
     long postSweepEndMs = 0; // absolute timestamp — monitor until this time
+    long postSweepEndTick = 0; // tick index when window closes
 
     for (int i = 0; i < ticks.Length; i++)
     {
@@ -142,10 +143,14 @@ static DayResult RunDay(int year, int month, int day)
             if (noAbs != null) PolicyEngine.RecordEvent(noAbs.Value);
 
             // ── Strong reversal signal → re-evaluate with current window ──
-            if (exhaustion != null || liqCluster != null)
+            if (exhaustion != null || liqCluster != null || absorption != null || reclaim != null)
             {
                 PolicyEngine.DiagReEvalAttempts++;
                 var freshState = ScoringEngine.RefreshState(w10, pendingSweepIsBullish);
+                // Update candidate with fresh state + signal flags
+                PolicyEngine.UpdateCandidate(freshState,
+                    exhaustion != null, absorption != null, reclaim != null,
+                    momPer != null, noAbs != null);
                 var reDecision = PolicyEngine.Decide(freshState, i, ticks[i].Price,
                     pendingSweepOrigin, pendingSweepIsBullish);
                 if (reDecision.Action == "enter")
@@ -154,6 +159,19 @@ static DayResult RunDay(int year, int month, int day)
                     PolicyEngine.PaperExecute(reDecision, ticks[i].Price, "sweep",
                         freshState.PatternSimilarity, freshState.KalmanVelocity, i,
                         pendingSweepOrigin, pendingSweepIsBullish);
+                }
+            }
+        }
+        else
+        {
+            // Post-sweep window closed — finalize pending candidate
+            if (PolicyEngine.DiagReEvalAttempts > 0 || i > postSweepEndTick + 1)
+            {
+                var finalDecision = PolicyEngine.FinalizeCandidate(i, ticks[i].Price);
+                if (finalDecision.Action == "enter")
+                {
+                    PolicyEngine.PaperExecute(finalDecision, ticks[i].Price, "sweep",
+                        0, 0, i, pendingSweepOrigin, pendingSweepIsBullish);
                 }
             }
         }
@@ -182,6 +200,7 @@ static DayResult RunDay(int year, int month, int day)
         pendingSweepOrigin = w5[0].Price;
         pendingSweepIsBullish = sweep.Value.Context == "bullish";
         postSweepEndMs = sweep.Value.Timestamp + POST_SWEEP_WINDOW_MS;
+        postSweepEndTick = i + 10; // ~10 minutes on 1m candles
 
         if (i < 9) continue;
         var scoreW10 = new MarketEvent[10];
@@ -192,12 +211,9 @@ static DayResult RunDay(int year, int month, int day)
         double sweepOrigin = w5[0].Price;
         bool isBullish = sweep.Value.Context == "bullish";
 
-        var decision = PolicyEngine.Decide(state, i, ticks[i].Price, sweepOrigin, isBullish);
-
-        if (decision.Action == "enter")
-        {
-            PolicyEngine.PaperExecute(decision, ticks[i].Price, "sweep", score.PatternSimilarity, score.StateVelocity, i, sweepOrigin, isBullish);
-        }
+        // Create candidate — defer entry decision to post-sweep window close
+        if (!PolicyEngine.InPosition)
+            PolicyEngine.CreateCandidate(i, postSweepEndTick, sweepOrigin, isBullish, state);
     }
 
     PolicyEngine.PrintPaperSummary();

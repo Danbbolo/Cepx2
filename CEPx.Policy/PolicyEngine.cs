@@ -168,6 +168,108 @@ public static class PolicyEngine
     private static long _lastNoAbsTimestamp;
     private static double _lastNoAbsScore;
 
+    // ── Sweep candidate lifecycle (replaces immediate Mode A/B decision) ──
+    private static bool _candidateActive;
+    private static long _candidateCreatedTick;
+    private static long _candidateExpiresTick;
+    private static double _candidateSweepOrigin;
+    private static bool _candidateIsBullish;
+    private static double _candidateBestContSim;
+    private static double _candidateBestRevScore;
+    private static double _candidateBestVel;
+    private static string _candidateBestRegime = "";
+    private static int _candidateExhaustionCount;
+    private static int _candidateAbsorptionCount;
+    private static int _candidateReclaimCount;
+    private static int _candidateMomPerCount;
+    private static int _candidateNoAbsCount;
+    private static string _candidateOutcome = "";
+    private static string _candidateReject = "";
+
+    /// <summary>Create a pending sweep candidate — entry decision deferred to window close.</summary>
+    public static void CreateCandidate(int tick, long expiresTick, double sweepOrigin, bool isBullish, BlackboardState state)
+    {
+        _candidateActive = true;
+        _candidateCreatedTick = tick;
+        _candidateExpiresTick = expiresTick;
+        _candidateSweepOrigin = sweepOrigin;
+        _candidateIsBullish = isBullish;
+        _candidateBestContSim = state.PatternSimilarity;
+        _candidateBestRevScore = state.ReversalScore;
+        _candidateBestVel = state.KalmanVelocity;
+        _candidateBestRegime = state.Regime;
+        _candidateExhaustionCount = 0;
+        _candidateAbsorptionCount = 0;
+        _candidateReclaimCount = 0;
+        _candidateMomPerCount = 0;
+        _candidateNoAbsCount = 0;
+        _candidateOutcome = "";
+        _candidateReject = "";
+    }
+
+    /// <summary>Update candidate with fresh state and accumulated signals.</summary>
+    public static void UpdateCandidate(BlackboardState freshState, bool exhaustionFired, bool absorptionFired, bool reclaimFired, bool momPerFired, bool noAbsFired)
+    {
+        if (!_candidateActive) return;
+        if (freshState.PatternSimilarity > _candidateBestContSim) _candidateBestContSim = freshState.PatternSimilarity;
+        if (freshState.ReversalScore > _candidateBestRevScore) _candidateBestRevScore = freshState.ReversalScore;
+        _candidateBestVel = freshState.KalmanVelocity;
+        _candidateBestRegime = freshState.Regime;
+        if (exhaustionFired) _candidateExhaustionCount++;
+        if (absorptionFired) _candidateAbsorptionCount++;
+        if (reclaimFired) _candidateReclaimCount++;
+        if (momPerFired) _candidateMomPerCount++;
+        if (noAbsFired) _candidateNoAbsCount++;
+    }
+
+    /// <summary>Finalize candidate: classify and return entry decision or noop.</summary>
+    public static PolicyDecision FinalizeCandidate(int tick, double price)
+    {
+        _candidateActive = false;
+        // Build synthetic BlackboardState from best evidence
+        var state = new BlackboardState(
+            0, "BTCUSDT", true, "sweep",
+            _candidateBestContSim, _candidateBestRevScore, _candidateBestVel,
+            0, 0, 0, _candidateBestRegime, 0.5, "hold");
+
+        // Re-use existing Decide logic for both modes
+        var decision = Decide(state, tick, price, _candidateSweepOrigin, _candidateIsBullish);
+
+        if (decision.Action == "enter")
+        {
+            _candidateOutcome = decision.Reason;
+            return decision;
+        }
+
+        // Diagnose rejection reason
+        double rev = _candidateBestRevScore;
+        double cont = _candidateBestContSim;
+        bool revHi = rev >= 0.5;
+        bool velExhausted = HasVelocityDirectionChanged() || Math.Abs(_candidateBestVel) < 0.1
+            || (_candidateIsBullish && _candidateBestVel < 0) || (!_candidateIsBullish && _candidateBestVel > 0);
+
+        if (revHi && !velExhausted)
+            _candidateReject = "no_mans_land";
+        else if (revHi)
+            _candidateReject = "rev_too_high_for_A_but_vel_ok";
+        else if (!velExhausted)
+            _candidateReject = "vel_not_exhausted";
+        else if (rev < 0.32)
+            _candidateReject = "rev_too_low";
+        else
+            _candidateReject = "gate_combo_fail";
+
+        _candidateOutcome = "no_trade";
+
+        // DIAG output
+        Console.WriteLine($"[CANDIDATE] tick={_candidateCreatedTick} cont={_candidateBestContSim:F3} rev={_candidateBestRevScore:F3} " +
+            $"vel={_candidateBestVel:F1} regime={_candidateBestRegime} exh={_candidateExhaustionCount} abs={_candidateAbsorptionCount} " +
+            $"rec={_candidateReclaimCount} mom={_candidateMomPerCount} noa={_candidateNoAbsCount} " +
+            $"outcome={_candidateOutcome} reject={_candidateReject}");
+
+        return new PolicyDecision(0, "BTCUSDT", "noop", "", "", 0);
+    }
+
     private static readonly List<double> _recentVelocities = new();
 
     public static void Reset()
@@ -200,6 +302,7 @@ public static class PolicyEngine
         _lastNoAbsType = "";
         _lastNoAbsTimestamp = 0;
         _lastNoAbsScore = 0;
+        _candidateActive = false;
         ModeACount = 0;
         ModeBCount = 0;
         MomDecayExits = 0;
