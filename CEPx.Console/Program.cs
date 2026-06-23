@@ -283,7 +283,11 @@ static DayResult RunDay(int year, int month, int day)
                     postSweepEndMs = ticks[i].Timestamp + POST_SWEEP_WINDOW_MS;
                     postSweepEndTick = i + 10;
                     PolicyEngine.CreateCandidate(i, postSweepEndTick, triggerPrice, bosBullish, nsState, "bos");
-                    Console.WriteLine($"[BOS-TRIGGER] tick={i} price={triggerPrice:F2} dir={(bosBullish?"bull":"bear")}");
+                    // DEBUG: finalize immediately
+                    var bosDecision = PolicyEngine.FinalizeCandidate(i, triggerPrice);
+                    if (bosDecision.Action == "enter")
+                        PolicyEngine.PaperExecute(bosDecision, triggerPrice, "bos", 0, 0, i, triggerPrice, bosBullish);
+                    Console.WriteLine($"[BOS-TRIGGER] tick={i} price={triggerPrice:F2} dir={(bosBullish?"bull":"bear")} outcome={bosDecision.Action}");
                 }
                 // Consolidation breakout trigger: tight range + volume expanding
                 double windowRangePct = (nsW10.Max(t => t.Price) - nsW10.Min(t => t.Price))
