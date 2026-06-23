@@ -15,6 +15,9 @@ namespace CEPx.Scoring;
 /// </summary>
 public class PrototypeDiagnostics
 {
+    /// <summary>Singleton instance for cross-layer access (Scoring→Diagnostics without Policy dependency).</summary>
+    public static PrototypeDiagnostics Instance { get; set; } = new();
+
     private readonly List<CandidateRecord> _candidates = new();
     private int _enteredIndex = -1; // index of the currently open candidate in _candidates
     private int _candidateSeq;      // monotonically increasing candidate id
@@ -48,6 +51,11 @@ public class PrototypeDiagnostics
             EffectiveRevScore = effectiveRev,
             FinalOutcome = finalOutcome,
             NoopReason = noopReason,
+            FamilyContScore = _pendingFamilyCont,
+            FamilyRevScore = _pendingFamilyRev,
+            FamilyBOSScore = _pendingFamilyBOS,
+            FamilyManipScore = _pendingFamilyManip,
+            MetaScore = _pendingMeta,
             PnL = 0,
             IsWin = false,
             ExitReason = "",
@@ -56,6 +64,20 @@ public class PrototypeDiagnostics
         _candidates.Add(rec);
         if (finalOutcome is "mode_a" or "mode_b")
             _enteredIndex = _candidates.Count - 1;
+    }
+
+    // ── Pending family scores (populated by ScoreMarket, consumed by RecordCandidate) ──
+    private double _pendingFamilyCont, _pendingFamilyRev, _pendingFamilyBOS, _pendingFamilyManip, _pendingMeta;
+
+    /// <summary>Feed family scores from the most recent ScoreMarket call.</summary>
+    public void RecordFamilyScores(double familyCont, double familyRev, double familyBOS,
+        double familyManip, double meta)
+    {
+        _pendingFamilyCont = familyCont;
+        _pendingFamilyRev = familyRev;
+        _pendingFamilyBOS = familyBOS;
+        _pendingFamilyManip = familyManip;
+        _pendingMeta = meta;
     }
 
     /// <summary>Feed the trade result after exit. Matches the most recent entered candidate.</summary>
@@ -292,6 +314,51 @@ public class PrototypeDiagnostics
             PrintPercentileTable("  Rev ", entered.Select(c => c.PeakRevScore).ToArray());
         }
 
+        // ── 13b. Family score distributions ───────────────────────
+        Console.WriteLine();
+        Console.WriteLine("-- Family Score Distributions (all candidates) --");
+        PrintPercentileTable("  famCont ", _candidates.Select(c => c.FamilyContScore).ToArray());
+        PrintPercentileTable("  famRev  ", _candidates.Select(c => c.FamilyRevScore).ToArray());
+        PrintPercentileTable("  famBOS  ", _candidates.Select(c => c.FamilyBOSScore).ToArray());
+        PrintPercentileTable("  famManip", _candidates.Select(c => c.FamilyManipScore).ToArray());
+        PrintPercentileTable("  meta    ", _candidates.Select(c => c.MetaScore).ToArray());
+
+        // ── 13c. Family contribution to winners vs losers ─────────
+        if (winners.Count >= 2 && losers.Count >= 2)
+        {
+            Console.WriteLine();
+            Console.WriteLine("-- Family Contribution: Winners vs Losers (entered only) --");
+            Console.WriteLine($"  {"Family",-12} {"Winners",8} {"Losers",8} {"Diff",8} {"Help/Hurt",10}");
+            Console.WriteLine(new string('-', 50));
+            PrintFamilyContribution("famCont", winners, losers, c => c.FamilyContScore);
+            PrintFamilyContribution("famRev", winners, losers, c => c.FamilyRevScore);
+            PrintFamilyContribution("famBOS", winners, losers, c => c.FamilyBOSScore);
+            PrintFamilyContribution("famManip", winners, losers, c => c.FamilyManipScore);
+            PrintFamilyContribution("meta", winners, losers, c => c.MetaScore);
+        }
+
+        // ── 13d. Meta-score filter analysis ───────────────────────
+        Console.WriteLine();
+        Console.WriteLine("-- Meta-Score Filter Analysis --");
+        double medMeta = Median(_candidates.Select(c => c.MetaScore).ToArray());
+        var highMetaCandidates = _candidates.Where(c => c.MetaScore >= medMeta).ToList();
+        var lowMetaCandidates = _candidates.Where(c => c.MetaScore < medMeta).ToList();
+        var highMetaEntered = highMetaCandidates.Where(c => c.FinalOutcome is "mode_a" or "mode_b").ToList();
+        var lowMetaEntered = lowMetaCandidates.Where(c => c.FinalOutcome is "mode_a" or "mode_b").ToList();
+        Console.WriteLine($"  Meta median: {medMeta:F3}");
+        Console.WriteLine($"  High meta (≥{medMeta:F2}): {highMetaCandidates.Count} candidates → {highMetaEntered.Count} entered, " +
+            $"{highMetaEntered.Count(c => c.IsWin)} wins ({100.0*highMetaEntered.Count(c=>c.IsWin)/Math.Max(1,highMetaEntered.Count):F0}%)");
+        Console.WriteLine($"  Low meta  (<{medMeta:F2}): {lowMetaCandidates.Count} candidates → {lowMetaEntered.Count} entered, " +
+            $"{lowMetaEntered.Count(c => c.IsWin)} wins ({100.0*lowMetaEntered.Count(c=>c.IsWin)/Math.Max(1,lowMetaEntered.Count):F0}%)");
+        if (highMetaEntered.Count > 0 && lowMetaEntered.Count > 0)
+        {
+            double highWinRate = (double)highMetaEntered.Count(c => c.IsWin) / highMetaEntered.Count;
+            double lowWinRate = (double)lowMetaEntered.Count(c => c.IsWin) / lowMetaEntered.Count;
+            Console.WriteLine(highWinRate > lowWinRate
+                ? $"  → Meta score HELPS: high-meta candidates win more ({highWinRate:P0} vs {lowWinRate:P0})"
+                : $"  → Meta score HURTS or is neutral: high-meta wins {highWinRate:P0} vs low-meta {lowWinRate:P0}");
+        }
+
         // ── 14. Threshold sweep ──────────────────────────────────
         Console.WriteLine();
         Console.WriteLine("-- Threshold Sweep (Continuation) --");
@@ -424,6 +491,17 @@ public class PrototypeDiagnostics
     private static void PrintActivation(string name, int count, int total)
     {
         Console.WriteLine($"  {name,-25}: {count,4}/{total} ({100.0 * count / Math.Max(1, total):F1}%)");
+    }
+
+    private static void PrintFamilyContribution(string label,
+        List<CandidateRecord> winners, List<CandidateRecord> losers,
+        Func<CandidateRecord, double> selector)
+    {
+        double wMean = winners.Average(selector);
+        double lMean = losers.Average(selector);
+        double diff = wMean - lMean;
+        string verdict = diff > 0.02 ? "HELPS" : diff < -0.02 ? "HURTS" : "neutral";
+        Console.WriteLine($"  {label,-12} {wMean,8:F3} {lMean,8:F3} {diff,8:+0.000;-0.000; 0.000} {verdict,10}");
     }
 
     // Approximate: check if exhaustion signals were present (revSignalCount includes absorption+reclaim too)
@@ -604,6 +682,12 @@ public class PrototypeDiagnostics
         // ── Layer 3: Effective scores (after aggregation + signal bonus) ──
         public double EffectiveContScore;
         public double EffectiveRevScore;
+        // ── Layer 4: Family scores (market-structure, Phase C+) ──
+        public double FamilyContScore;
+        public double FamilyRevScore;
+        public double FamilyBOSScore;
+        public double FamilyManipScore;
+        public double MetaScore;
         // ── Metadata ──
         public int RevSignalCount;
         public int ContSignalCount;

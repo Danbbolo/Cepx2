@@ -297,6 +297,17 @@ public static class ScoringEngine
         // ── Call structure scorers ────────────────────────────────
         var msScore = StructureScorers.ScoreMarket(window, eventsWithVel, config);
 
+        // ── Record family scores for diagnostics ──────────────────
+        double famCont = new[] { msScore.MomentumPersistScore, msScore.CleanContScore,
+            msScore.PullbackResumeScore, msScore.ConsolidationScore,
+            msScore.TrendContinuationScore }.Max();
+        double famRev = new[] { msScore.SweepReclaimScore, msScore.ExhaustionScore,
+            msScore.AbsorptionScore, msScore.LiqClusterScore,
+            msScore.BreakoutFailScore, msScore.DoubleStructureScore }.Max();
+        double famBOS = msScore.BOSScore;
+        double famManip = Math.Max(msScore.StopHuntScore, msScore.LowLiquidityRejectScore);
+        PrototypeDiagnostics.Instance.RecordFamilyScores(famCont, famRev, famBOS, famManip, msScore.MetaScore);
+
         // ── Regime detection (same logic as WriteState) ───────────
         var (regime, regimeConf) = DetectRegime(window);
 

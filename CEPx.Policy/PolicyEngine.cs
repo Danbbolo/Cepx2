@@ -138,7 +138,7 @@ public static class PolicyEngine
     // END DIAG
 
     // ── Prototype discrimination diagnostics ──────────────────────
-    public static PrototypeDiagnostics ProtoDiag = new();
+    public static PrototypeDiagnostics ProtoDiag => PrototypeDiagnostics.Instance;
     // END PROTODIAG
 
     // ── Structural exit state ─────────────────────────────────────────
